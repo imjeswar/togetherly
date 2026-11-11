@@ -1,0 +1,15 @@
+{
+  "name": "togetherly",
+  "version": "1.0.0",
+  "description": "Togetherly - A little moment. A stronger connection.",
+  "scripts": {
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "concurrently -n \"server,client\" -c \"magenta,cyan\" \"npm run dev:server\" \"npm run dev:client\"",
+    "build": "npm --prefix server run build && npm --prefix client run build",
+    "start": "npm --prefix server start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

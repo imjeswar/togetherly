@@ -1,0 +1,358 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String             @id @default(uuid())
+  email           String             @unique
+  passwordHash    String
+  firstName       String
+  lastName        String?
+  avatarUrl       String?
+  dateOfBirth     DateTime
+  emailVerified   Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  relationshipId  String?
+  relationship    Relationship?      @relation(fields: [relationshipId], references: [id], onDelete: SetNull)
+
+  profile         UserProfile?
+  settings        UserSettings?
+
+  sentInvitations     PartnerInvitation[] @relation("SentInvitations")
+  receivedInvitations  PartnerInvitation[] @relation("ReceivedInvitations")
+
+  questionResponses   QuestionResponse[]
+  photoUploads        Photo[]
+  gameResponses       GameResponse[]
+  sentMessages        Message[]
+  sentLoveNotes       LoveNote[]         @relation("SentLoveNotes")
+  receivedLoveNotes   LoveNote[]         @relation("ReceivedLoveNotes")
+  achievements        UserAchievement[]
+  notifications       Notification[]
+
+  @@index([email])
+  @@index([relationshipId])
+}
+
+model UserProfile {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio             String?
+  nickname        String?
+  loveLanguage    String?
+  favoriteMemory  String?
+  interests       String    @default("[]") // JSON array
+  timezone        String    @default("UTC")
+}
+
+model Relationship {
+  id               String            @id @default(uuid())
+  code             String            @unique // 6-character partner invite code
+  anniversaryDate  DateTime?
+  status           String            @default("ACTIVE") // ACTIVE, PAUSED, UNPAIRED
+  relationshipType String            @default("DATING") // DATING, ENGAGED, MARRIED, PARTNERS
+  isLongDistance   Boolean           @default(false)
+  streakCount      Int               @default(1)
+  lastStreakDate   DateTime?
+  couplePoints     Int               @default(50)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  users            User[]
+  dailyChallenges  DailyChallenge[]
+  photos           Photo[]
+  gameSessions     GameSession[]
+  drawings         Drawing[]
+  messages         Message[]
+  loveNotes        LoveNote[]
+  memories         Memory[]
+  savedDateIdeas   SavedDateIdea[]
+  streaks          Streak[]
+
+  @@index([code])
+}
+
+model PartnerInvitation {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  senderId      String
+  sender        User      @relation("SentInvitations", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverEmail String?
+  receiverId    String?
+  receiver      User?     @relation("ReceivedInvitations", fields: [receiverId], references: [id], onDelete: SetNull)
+  status        String    @default("PENDING") // PENDING, ACCEPTED, REJECTED, EXPIRED
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([code])
+}
+
+model QuestionCategory {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  icon        String?
+  questions   Question[]
+}
+
+model Question {
+  id             String             @id @default(uuid())
+  text           String
+  categoryId     String
+  category       QuestionCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  intimacyLevel  Int                @default(1) // 1: Fun/Casual, 2: Meaningful, 3: Deep/Intimate
+  isDaily        Boolean            @default(false)
+  responses      QuestionResponse[]
+
+  @@index([categoryId])
+}
+
+model QuestionResponse {
+  id              String    @id @default(uuid())
+  questionId      String
+  question        Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relationshipId  String
+  answer          String
+  isHidden        Boolean   @default(true) // Hidden until partner answers
+  reaction        String?   // Partner's reaction emoji
+  partnerComment  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([questionId, relationshipId])
+  @@index([userId])
+}
+
+model DailyChallenge {
+  id               String       @id @default(uuid())
+  relationshipId   String
+  relationship     Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  date             String       // YYYY-MM-DD
+  activityType     String       // QUESTION, PHOTO, GAME, DRAWING, LOVE_NOTE
+  title            String
+  description      String
+  isCompleted      Boolean      @default(false)
+  completedByUsers String       @default("[]") // JSON array of userIds
+  createdAt        DateTime     @default(now())
+
+  @@unique([relationshipId, date])
+}
+
+model Photo {
+  id              String       @id @default(uuid())
+  relationshipId  String
+  relationship    Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt          String?
+  photoUrl        String
+  caption         String?
+  challengeDate   String?      // YYYY-MM-DD
+  createdAt       DateTime     @default(now())
+
+  @@index([relationshipId])
+  @@index([userId])
+}
+
+model Game {
+  id          String        @id @default(uuid())
+  code        String        @unique // WHO_KNOWS, MORE_LIKELY, THIS_OR_THAT, WOULD_YOU_RATHER, DRAW_DUEL, LOVE_QUIZ, WORD_GAME
+  title       String
+  description String
+  category    String
+  icon        String
+  sessions    GameSession[]
+}
+
+model GameSession {
+  id              String         @id @default(uuid())
+  gameId          String
+  game            Game           @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  relationshipId  String
+  relationship    Relationship   @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  status          String         @default("IN_PROGRESS") // IN_PROGRESS, COMPLETED
+  currentRound    Int            @default(1)
+  totalRounds     Int            @default(5)
+  gameState       String         @default("{}") // JSON state
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  responses       GameResponse[]
+
+  @@index([relationshipId])
+}
+
+model GameResponse {
+  id          String      @id @default(uuid())
+  sessionId   String
+  session     GameSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roundNumber Int
+  answer      String
+  score       Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  @@index([sessionId])
+}
+
+model Drawing {
+  id             String       @id @default(uuid())
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  title          String       @default("Our Romantic Canvas")
+  canvasData     String       // JSON stroke path or SVG data
+  previewUrl     String?
+  stickyNotes    String       @default("[]") // JSON notes
+  createdBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([relationshipId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  text           String
+  mediaUrl       String?
+  reactions      String       @default("{}") // JSON { userId: "❤️" }
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@index([relationshipId])
+}
+
+model LoveNote {
+  id              String       @id @default(uuid())
+  relationshipId  String
+  relationship    Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  senderId        String
+  sender          User         @relation("SentLoveNotes", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId      String
+  receiver        User         @relation("ReceivedLoveNotes", fields: [receiverId], references: [id], onDelete: Cascade)
+  unlockCondition String       // MISS_YOU, SAD, MOTIVATION, SMILE, ANNIVERSARY, SPECIAL_DAY
+  title           String
+  content         String
+  theme           String       @default("romantic") // romantic, starlight, golden, whisper
+  unlockDate      DateTime?
+  isOpened        Boolean      @default(false)
+  openedAt        DateTime?
+  createdAt       DateTime     @default(now())
+
+  @@index([relationshipId])
+}
+
+model Memory {
+  id             String       @id @default(uuid())
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?
+  date           DateTime     @default(now())
+  type           String       // PHOTO, MILESTONE, DRAWING, GAME, LOVE_NOTE, ANNIVERSARY
+  mediaUrl       String?
+  metadata       String       @default("{}") // JSON
+  createdAt      DateTime     @default(now())
+
+  @@index([relationshipId])
+}
+
+model DateIdea {
+  id             String          @id @default(uuid())
+  title          String
+  description    String
+  category       String          // AT_HOME, OUTDOORS, ROMANTIC, BUDGET, FOOD, MOVIE, TRAVEL, LONG_DISTANCE
+  budget         String          // $, $$, $$$
+  duration       String?
+  icon           String?
+  savedInstances SavedDateIdea[]
+}
+
+model SavedDateIdea {
+  id             String       @id @default(uuid())
+  dateIdeaId     String
+  dateIdea       DateIdea     @relation(fields: [dateIdeaId], references: [id], onDelete: Cascade)
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  likedByUsers   String       @default("[]") // JSON array of userIds
+  isMutualMatch  Boolean      @default(false)
+  isCompleted    Boolean      @default(false)
+  scheduledFor   DateTime?
+  notes          String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([dateIdeaId, relationshipId])
+  @@index([relationshipId])
+}
+
+model Achievement {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  title            String
+  description      String
+  icon             String
+  category         String
+  pointsReward     Int               @default(50)
+  userAchievements UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([achievementId, userId])
+}
+
+model Streak {
+  id             String       @id @default(uuid())
+  relationshipId String
+  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  date           String       // YYYY-MM-DD
+  completedCount Int          @default(1)
+  activities     String       @default("[]") // JSON array of completed activity types
+
+  @@unique([relationshipId, date])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // PARTNER_INVITE, QUESTION_ANSWERED, PHOTO_UPLOADED, LOVE_NOTE, GAME_INVITE, ACHIEVEMENT, ANNIVERSARY
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model UserSettings {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushNotifications  Boolean  @default(true)
+  emailNotifications Boolean  @default(true)
+  soundEffects       Boolean  @default(true)
+  theme              String   @default("dark")
+  privacyMode        Boolean  @default(false)
+}
