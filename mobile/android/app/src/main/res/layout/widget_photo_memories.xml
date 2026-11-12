@@ -5,20 +5,55 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_card_background">
 
+    <!-- Active Received Photo Bitmap -->
     <ImageView
         android:id="@+id/iv_memory_photo"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="centerCrop"
-        android:src="@android:drawable/ic_menu_gallery" />
+        android:visibility="gone" />
 
+    <!-- Fallback Placeholder when no photo exists yet -->
+    <LinearLayout
+        android:id="@+id/layout_photo_placeholder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="12dp">
+
+        <ImageView
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_gallery"
+            android:tint="#D9B77E" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Our Photos"
+            android:textColor="#FFF8F5"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No moments yet"
+            android:textColor="#E8A0A8"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- Bottom Caption Overlay -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#AA0D0B10"
+        android:background="#BB0D0B10"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
         android:gravity="center_vertical">
 
         <TextView
@@ -29,14 +64,14 @@
             android:text="Our Latest Moment"
             android:textColor="#FFF8F5"
             android:textSize="11sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:singleLine="true" />
 
         <ImageView
             android:id="@+id/btn_quick_camera"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
             android:src="@android:drawable/ic_menu_camera"
             android:tint="#E8A0A8" />
     </LinearLayout>
 </FrameLayout>
-

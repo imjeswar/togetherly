@@ -1,34 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_drawing_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:background="@drawable/widget_card_background"
-    android:padding="12dp">
+    android:background="@drawable/widget_card_background">
 
+    <!-- Active Vector Drawing Bitmap -->
     <ImageView
-        android:id="@+id/iv_drawing_icon"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/ic_menu_edit"
-        android:tint="#E8A0A8" />
+        android:id="@+id/iv_drawing_bitmap"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter"
+        android:padding="8dp"
+        android:visibility="gone" />
 
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- Fallback Placeholder when no drawing exists yet -->
+    <LinearLayout
+        android:id="@+id/layout_drawing_placeholder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="12dp">
+
+        <ImageView
+            android:id="@+id/iv_drawing_icon"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_edit"
+            android:tint="#E8A0A8" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Quick Sketch"
+            android:textColor="#FFF8F5"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginTop="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tap to Doodle"
+            android:textColor="#D9B77E"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- Bottom Caption Overlay -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Quick Sketch"
-        android:textColor="#FFF8F5"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        android:layout_marginTop="6dp" />
+        android:layout_gravity="bottom"
+        android:background="#BB0D0B10"
+        android:orientation="horizontal"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:gravity="center_vertical">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Tap to Doodle"
-        android:textColor="#D9B77E"
-        android:textSize="10sp" />
-</LinearLayout>
+        <TextView
+            android:id="@+id/tv_drawing_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Our Latest Doodle"
+            android:textColor="#FFF8F5"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:singleLine="true" />
 
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:src="@android:drawable/ic_menu_edit"
+            android:tint="#E8A0A8" />
+    </LinearLayout>
+</FrameLayout>

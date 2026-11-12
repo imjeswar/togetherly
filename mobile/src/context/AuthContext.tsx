@@ -4,6 +4,8 @@ import { secureStorage } from '../services/secureStore';
 import { offlineStorage } from '../services/offlineStorage';
 import { api } from '../services/api';
 import { socketService, SocketStatus } from '../services/socket';
+import { widgetBridge } from '../services/widgetBridge';
+import { ENV } from '../config/env';
 
 export interface PairedPartner {
   id: string;
@@ -154,6 +156,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 evt.data.title || 'Partner Drawing',
                 evt.data.canvasData
               );
+              await widgetBridge.updateDrawingWidget(
+                evt.data.title || 'Our Latest Doodle',
+                evt.data.canvasData
+              );
+            } else if (evt.eventType === 'PHOTO' && (evt.data?.photoUrl || evt.mediaUrl)) {
+              const rawUrl = evt.data?.photoUrl || evt.mediaUrl;
+              const fullUrl = rawUrl.startsWith('http') || rawUrl.startsWith('data:')
+                ? rawUrl
+                : `${ENV.API_BASE_URL.replace(/\/api\/?$/, '')}${rawUrl.startsWith('/') ? rawUrl : '/' + rawUrl}`;
+              await widgetBridge.updatePhotoWidget(fullUrl, evt.data?.caption);
             }
           }
           if (ackIds.length > 0) {

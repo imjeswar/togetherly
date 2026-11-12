@@ -32,6 +32,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { socketService } from '../../services/socket';
 import { offlineStorage } from '../../services/offlineStorage';
+import { widgetBridge } from '../../services/widgetBridge';
 import { ENV } from '../../config/env';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -81,6 +82,9 @@ export const PhotoMomentsScreen: React.FC = () => {
         { ...photo, isFromPartner: true, deliveryStatus: 'DELIVERED', createdAt: new Date().toISOString() },
         ...prev,
       ]);
+      if (photo?.photoUrl) {
+        widgetBridge.updatePhotoWidget(resolveMediaUrl(photo.photoUrl), photo.caption);
+      }
       // Mark seen automatically when in photo screen
       if (photo?.photoId) {
         api.markPhotoSeen(photo.photoId).catch(() => {});

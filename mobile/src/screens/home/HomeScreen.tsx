@@ -41,6 +41,7 @@ import { Input } from '../../components/ui/Input';
 import { FlameIcon } from '../../components/ui/FlameIcon';
 import { Stroke } from '../../components/drawing/Canvas';
 import Svg, { Path } from 'react-native-svg';
+import { widgetBridge } from '../../services/widgetBridge';
 import { theme } from '../../config/theme';
 
 function parseStrokes(canvasData: any): Stroke[] {
@@ -48,7 +49,10 @@ function parseStrokes(canvasData: any): Stroke[] {
   if (Array.isArray(canvasData)) return canvasData;
   if (typeof canvasData === 'string') {
     try {
-      const parsed = JSON.parse(canvasData);
+      let parsed = JSON.parse(canvasData);
+      if (typeof parsed === 'string') {
+        parsed = JSON.parse(parsed);
+      }
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
@@ -93,6 +97,10 @@ export const HomeScreen: React.FC = () => {
       const cached = await offlineStorage.getCachedDrawings();
       if (cached && cached.length > 0) {
         setRecentDrawings(cached);
+        // Sync widget with latest cached drawing
+        if (cached[0].canvasData) {
+          widgetBridge.updateDrawingWidget(cached[0].title || 'Our Latest Doodle', cached[0].canvasData);
+        }
       }
     } catch {}
 
@@ -104,9 +112,31 @@ export const HomeScreen: React.FC = () => {
       ]);
 
       if (drawingsRes.status === 'fulfilled' && drawingsRes.value?.drawings) {
-        setRecentDrawings(drawingsRes.value.drawings);
+        const cached = await offlineStorage.getCachedDrawings();
+        const cachedMap = new Map(cached.map((c) => [c.id, c]));
+
+        // Merge with local cache so canvasData is never wiped out
+        const mergedDrawings = drawingsRes.value.drawings.map((d: any) => {
+          const local = cachedMap.get(d.id);
+          const canvasData = d.canvasData || local?.canvasData || '';
+          return {
+            ...d,
+            canvasData,
+          };
+        });
+
+        setRecentDrawings(mergedDrawings);
+
+        // Update drawing widget
+        if (mergedDrawings.length > 0 && mergedDrawings[0].canvasData) {
+          widgetBridge.updateDrawingWidget(
+            mergedDrawings[0].title || 'Our Latest Doodle',
+            mergedDrawings[0].canvasData
+          );
+        }
+
         // Persist to local SQLite
-        for (const d of drawingsRes.value.drawings) {
+        for (const d of mergedDrawings) {
           if (d.canvasData) {
             await offlineStorage.saveDrawingDraft(d.id, d.title || 'Drawing', d.canvasData, d.previewUrl);
           }
@@ -114,6 +144,10 @@ export const HomeScreen: React.FC = () => {
       }
       if (photosRes.status === 'fulfilled' && photosRes.value?.photos) {
         setRecentPhotos(photosRes.value.photos);
+        if (photosRes.value.photos.length > 0) {
+          const p = photosRes.value.photos[0];
+          widgetBridge.updatePhotoWidget(resolveMediaUrl(p.photoUrl), p.caption);
+        }
       }
     } catch {}
   }, []);
@@ -139,10 +173,15 @@ export const HomeScreen: React.FC = () => {
           drawing.canvasData,
           drawing.previewUrl
         );
+        // Immediately refresh Quick Sketch widget with the actual artwork!
+        await widgetBridge.updateDrawingWidget(
+          drawing.title || 'Doodle from ' + (partner?.nickname || 'Partner'),
+          drawing.canvasData
+        );
       }
     });
 
-    const unsubPhoto = socketService.on('incoming_photo', (photo: any) => {
+    const unsubPhoto = socketService.on('incoming_photo', async (photo: any) => {
       const formatted = {
         ...photo,
         id: photo.photoId || photo.id || `photo_${Date.now()}`,
@@ -151,13 +190,27 @@ export const HomeScreen: React.FC = () => {
         createdAt: photo.createdAt || new Date().toISOString(),
       };
       setRecentPhotos((prev) => [formatted, ...prev]);
+
+      if (photo.photoUrl) {
+        // Immediately refresh Our Photos widget with the received photo!
+        await widgetBridge.updatePhotoWidget(resolveMediaUrl(photo.photoUrl), photo.caption);
+      }
     });
 
     return () => {
       unsubDrawing?.();
       unsubPhoto?.();
     };
-  }, [loadRecentContent]);
+  }, [loadRecentContent, partner?.nickname]);
+
+  // Sync Our Little Space widget on presence changes
+  useEffect(() => {
+    widgetBridge.updateSpaceWidget(
+      partner?.nickname || 'My Love',
+      partnerOnline,
+      space?.daysTogether || 1
+    );
+  }, [partner?.nickname, partnerOnline, space?.daysTogether]);
 
   const onRefresh = async () => {
     setRefreshing(true);

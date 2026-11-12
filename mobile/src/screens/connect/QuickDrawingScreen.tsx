@@ -14,6 +14,7 @@ import { Canvas, Stroke } from '../../components/drawing/Canvas';
 import { Button } from '../../components/ui/Button';
 import { api } from '../../services/api';
 import { offlineStorage } from '../../services/offlineStorage';
+import { widgetBridge } from '../../services/widgetBridge';
 import { useAuth } from '../../context/AuthContext';
 import { theme } from '../../config/theme';
 
@@ -39,6 +40,7 @@ export const QuickDrawingScreen: React.FC = () => {
     try {
       // 1. Save locally to SQLite immediately so user never loses it
       await offlineStorage.saveDrawingDraft(eventId, 'Quick Sketch', canvasData);
+      await widgetBridge.updateDrawingWidget('Quick Doodle', canvasData);
 
       // 2. Transmit to backend
       const res = await api.sendQuickDraw({
