@@ -34,8 +34,10 @@ export const PALETTE = [
 
 export const STROKE_WIDTHS = [2, 4, 8, 14];
 
+const EMPTY_STROKES: Stroke[] = [];
+
 export const Canvas: React.FC<CanvasProps> = ({
-  initialStrokes = [],
+  initialStrokes = EMPTY_STROKES,
   onStrokesChange,
   height = 360,
   readOnly = false,
@@ -57,11 +59,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentColorRef.current = currentColor;
   currentWidthRef.current = currentWidth;
 
-  // Sync external initialStrokes when updated (e.g., from partner or DB fetch)
+  // Sync external initialStrokes only when truly changed externally
   useEffect(() => {
-    if (initialStrokes && Array.isArray(initialStrokes)) {
-      setStrokes(initialStrokes);
-      strokesRef.current = initialStrokes;
+    if (initialStrokes && Array.isArray(initialStrokes) && initialStrokes !== EMPTY_STROKES) {
+      if (initialStrokes.length !== strokesRef.current.length || JSON.stringify(initialStrokes) !== JSON.stringify(strokesRef.current)) {
+        setStrokes(initialStrokes);
+        strokesRef.current = initialStrokes;
+      }
     }
   }, [initialStrokes]);
 
@@ -69,7 +73,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => !readOnly,
+      onStartShouldSetPanResponderCapture: () => !readOnly,
       onMoveShouldSetPanResponder: () => !readOnly,
+      onMoveShouldSetPanResponderCapture: () => !readOnly,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (evt: GestureResponderEvent) => {
         if (readOnly) return;
         const { locationX, locationY } = evt.nativeEvent;
@@ -81,7 +88,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       onPanResponderMove: (evt: GestureResponderEvent) => {
         if (readOnly) return;
         const { locationX, locationY } = evt.nativeEvent;
-        const d = `${currentPathRef.current} L${locationX.toFixed(1)},${locationY.toFixed(1)}`;
+        const d = `${currentPathRef.current || `M${locationX.toFixed(1)},${locationY.toFixed(1)}`} L${locationX.toFixed(1)},${locationY.toFixed(1)}`;
         currentPathRef.current = d;
         setCurrentPath(d);
       },
@@ -114,6 +121,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         onStrokesChange?.(updated);
       },
       onPanResponderTerminate: () => {
+        // If Android system dispatches terminate, save any captured stroke instead of discarding
+        if (currentPathRef.current) {
+          let finalPath = currentPathRef.current;
+          if (!finalPath.includes('L')) {
+            const match = finalPath.match(/M([\d.-]+),([\d.-]+)/);
+            if (match) {
+              const x = parseFloat(match[1]);
+              const y = parseFloat(match[2]);
+              finalPath = `M${x.toFixed(1)},${y.toFixed(1)} L${(x + 0.5).toFixed(1)},${(y + 0.5).toFixed(1)}`;
+            }
+          }
+          const newStroke: Stroke = {
+            path: finalPath,
+            color: currentColorRef.current,
+            width: currentWidthRef.current,
+          };
+          const updated = [...strokesRef.current, newStroke];
+          strokesRef.current = updated;
+          setStrokes(updated);
+          onStrokesChange?.(updated);
+        }
         currentPathRef.current = '';
         setCurrentPath('');
       },
@@ -217,7 +245,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         style={[styles.canvasArea, { height }]}
         {...(!readOnly ? panResponder.panHandlers : {})}
       >
-        <Svg style={StyleSheet.absoluteFill}>
+        <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
           {strokes.map((s, idx) => (
             <Path
               key={`stroke-${idx}`}

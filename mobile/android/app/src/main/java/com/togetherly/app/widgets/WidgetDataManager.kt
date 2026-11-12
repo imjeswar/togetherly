@@ -81,6 +81,32 @@ object WidgetDataManager {
         if (localPathOrBase64.isNullOrEmpty()) return
 
         try {
+            // Handle remote HTTP / HTTPS URLs (e.g. from Render or CDN)
+            if (localPathOrBase64.startsWith("http://") || localPathOrBase64.startsWith("https://")) {
+                Thread {
+                    try {
+                        val url = java.net.URL(localPathOrBase64)
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 10000
+                        conn.readTimeout = 15000
+                        conn.instanceFollowRedirects = true
+                        conn.doInput = true
+                        conn.connect()
+                        if (conn.responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                            conn.inputStream.use { input ->
+                                val downloadedBitmap = BitmapFactory.decodeStream(input)
+                                if (downloadedBitmap != null) {
+                                    processAndStorePhotoBitmap(context, downloadedBitmap, caption)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }.start()
+                return
+            }
+
             var srcBitmap: Bitmap? = null
 
             if (localPathOrBase64.startsWith("data:image")) {
@@ -96,30 +122,38 @@ object WidgetDataManager {
             }
 
             if (srcBitmap != null) {
-                // Resize to max 500x500 to prevent RemoteViews binder transaction memory overflow
-                val maxDim = 500
-                val width = srcBitmap.width
-                val height = srcBitmap.height
-                val scale = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
-                val targetW = Math.max(1, (width * scale).toInt())
-                val targetH = Math.max(1, (height * scale).toInt())
-
-                val scaledBitmap = Bitmap.createScaledBitmap(srcBitmap, targetW, targetH, true)
-
-                val outFile = File(context.filesDir, PHOTO_FILENAME)
-                FileOutputStream(outFile).use { out ->
-                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-                }
-
-                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit()
-                    .putString("latest_photo_caption", caption ?: "Our Latest Moment")
-                    .putBoolean("has_photo", true)
-                    .putLong("photo_updated_at", System.currentTimeMillis())
-                    .apply()
-
-                updatePhotoWidgets(context)
+                processAndStorePhotoBitmap(context, srcBitmap, caption)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun processAndStorePhotoBitmap(context: Context, srcBitmap: Bitmap, caption: String?) {
+        try {
+            // Resize to max 500x500 to prevent RemoteViews binder transaction memory overflow
+            val maxDim = 500
+            val width = srcBitmap.width
+            val height = srcBitmap.height
+            val scale = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+            val targetW = Math.max(1, (width * scale).toInt())
+            val targetH = Math.max(1, (height * scale).toInt())
+
+            val scaledBitmap = Bitmap.createScaledBitmap(srcBitmap, targetW, targetH, true)
+
+            val outFile = File(context.filesDir, PHOTO_FILENAME)
+            FileOutputStream(outFile).use { out ->
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("latest_photo_caption", caption ?: "Our Latest Moment")
+                .putBoolean("has_photo", true)
+                .putLong("photo_updated_at", System.currentTimeMillis())
+                .apply()
+
+            updatePhotoWidgets(context)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -336,3 +370,4 @@ object WidgetDataManager {
         return path
     }
 }
+

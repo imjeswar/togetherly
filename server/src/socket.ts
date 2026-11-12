@@ -8,8 +8,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'togetherly-secret-key-couples-plat
 
 // In-memory presence tracker: spaceId -> (deviceId -> Set<socketId>)
 const spacePresence = new Map<string, Map<string, Set<string>>>();
+// Debounce timers for offline notifications (15s grace period)
+const offlineTimers = new Map<string, NodeJS.Timeout>();
 
 function addDeviceSocket(spaceId: string, deviceId: string, socketId: string) {
+  cancelDeviceOffline(spaceId, deviceId);
   if (!spacePresence.has(spaceId)) {
     spacePresence.set(spaceId, new Map());
   }
@@ -32,10 +35,45 @@ function removeDeviceSocket(spaceId: string, deviceId: string, socketId: string)
       if (spaceDevices.size === 0) {
         spacePresence.delete(spaceId);
       }
-      return true; // device is now fully offline
+      return true; // device has 0 active sockets right now
     }
   }
   return false; // device still has other active sockets
+}
+
+function scheduleDeviceOffline(spaceId: string, deviceId: string) {
+  const key = `${spaceId}:${deviceId}`;
+  if (offlineTimers.has(key)) {
+    clearTimeout(offlineTimers.get(key)!);
+  }
+  const timer = setTimeout(() => {
+    offlineTimers.delete(key);
+    // Double check if device really has 0 active sockets after grace period
+    if (!isDeviceOnline(spaceId, deviceId)) {
+      if (ioInstance) {
+        ioInstance.to(`space_${spaceId}`).emit('partner_offline', {
+          deviceId,
+          spaceId,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      prisma.pairedDevice
+        .updateMany({
+          where: { deviceId, spaceId },
+          data: { lastActiveAt: new Date() },
+        })
+        .catch(() => {});
+    }
+  }, 15000); // 15-second grace period
+  offlineTimers.set(key, timer);
+}
+
+function cancelDeviceOffline(spaceId: string, deviceId: string) {
+  const key = `${spaceId}:${deviceId}`;
+  if (offlineTimers.has(key)) {
+    clearTimeout(offlineTimers.get(key)!);
+    offlineTimers.delete(key);
+  }
 }
 
 export function isDeviceOnline(spaceId: string, deviceId: string): boolean {
@@ -150,11 +188,14 @@ export function setupSocketIO(server: HTTPServer) {
       }
     });
 
-    // 2. EXPLICIT PRESENCE QUERY / HEARTBEAT
-    socket.on('query_presence', ({ spaceId, deviceId }: { spaceId?: string; deviceId?: string }) => {
+    // 2. EXPLICIT PRESENCE QUERY & HEARTBEAT
+    const handlePresenceCheck = ({ spaceId, deviceId }: { spaceId?: string; deviceId?: string }) => {
       const targetSpace = spaceId || currentSpaceId;
       const targetDevice = deviceId || currentDeviceId;
       if (targetSpace && targetDevice) {
+        cancelDeviceOffline(targetSpace, targetDevice);
+        addDeviceSocket(targetSpace, targetDevice, socket.id);
+
         const partnerIsOnline = isPartnerOnline(targetSpace, targetDevice);
         socket.emit('presence_sync', {
           partnerOnline: partnerIsOnline,
@@ -162,8 +203,19 @@ export function setupSocketIO(server: HTTPServer) {
           deviceId: targetDevice,
           timestamp: new Date().toISOString(),
         });
+
+        // Touch DB activity timestamp
+        prisma.pairedDevice
+          .updateMany({
+            where: { deviceId: targetDevice, spaceId: targetSpace },
+            data: { lastActiveAt: new Date() },
+          })
+          .catch(() => {});
       }
-    });
+    };
+
+    socket.on('query_presence', handlePresenceCheck);
+    socket.on('presence_heartbeat', handlePresenceCheck);
 
     // 3. REAL-TIME SHARED CANVAS STROKE SYNCHRONIZATION
     socket.on('shared_canvas_stroke', ({ spaceId, stroke, deviceId }: any) => {
@@ -234,23 +286,12 @@ export function setupSocketIO(server: HTTPServer) {
     socket.on('join_relationship', handleLegacyJoin);
     socket.on('couple:join', handleLegacyJoin);
 
-    // 6. DISCONNECTION LIFECYCLE
+    // 6. DISCONNECTION LIFECYCLE (Debounced to prevent transient network drops from showing offline)
     socket.on('disconnect', () => {
       if (currentSpaceId && currentDeviceId) {
         const fullyOffline = removeDeviceSocket(currentSpaceId, currentDeviceId, socket.id);
         if (fullyOffline) {
-          socket.to(`space_${currentSpaceId}`).emit('partner_offline', {
-            deviceId: currentDeviceId,
-            spaceId: currentSpaceId,
-            timestamp: new Date().toISOString(),
-          });
-
-          prisma.pairedDevice
-            .updateMany({
-              where: { deviceId: currentDeviceId, spaceId: currentSpaceId },
-              data: { lastActiveAt: new Date() },
-            })
-            .catch(() => {});
+          scheduleDeviceOffline(currentSpaceId, currentDeviceId);
         }
       }
       if (legacyUserId) {

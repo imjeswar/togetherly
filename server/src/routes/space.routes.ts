@@ -304,7 +304,14 @@ router.get('/status', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: 
     const selfDevice = space.devices.find((d) => d.deviceId === req.device!.deviceId);
     const partnerDevice = space.devices.find((d) => d.deviceId !== req.device!.deviceId);
     const isPaired = Boolean(partnerDevice);
-    const partnerIsOnline = partnerDevice ? isDeviceOnline(space.id, partnerDevice.deviceId) : false;
+    let partnerIsOnline = partnerDevice ? isDeviceOnline(space.id, partnerDevice.deviceId) : false;
+    // Fallback: If memory presence was cleared due to server restart, check recent lastActiveAt (< 45s)
+    if (!partnerIsOnline && partnerDevice?.lastActiveAt) {
+      const diffSec = (Date.now() - new Date(partnerDevice.lastActiveAt).getTime()) / 1000;
+      if (diffSec < 45) {
+        partnerIsOnline = true;
+      }
+    }
 
     // Asynchronously refresh self device lastActiveAt
     prisma.pairedDevice

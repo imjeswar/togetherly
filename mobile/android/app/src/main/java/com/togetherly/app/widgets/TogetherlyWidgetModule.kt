@@ -50,3 +50,4 @@ class TogetherlyWidgetModule(private val reactContext: ReactApplicationContext) 
         }
     }
 }
+

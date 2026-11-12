@@ -46,8 +46,24 @@ export const widgetBridge = {
     try {
       if (!localPhotoUriOrBase64) return;
 
+      let finalTarget = localPhotoUriOrBase64;
+
+      // If remote HTTP/HTTPS URL, download locally first via FileSystem for instant availability
+      if (localPhotoUriOrBase64.startsWith('http://') || localPhotoUriOrBase64.startsWith('https://')) {
+        try {
+          const localCachePath = `${FileSystem.cacheDirectory}partner_widget_photo.jpg`;
+          const downloadRes = await FileSystem.downloadAsync(localPhotoUriOrBase64, localCachePath);
+          if (downloadRes?.uri) {
+            finalTarget = downloadRes.uri;
+          }
+        } catch {
+          // If JS download fails, keep remote URL for native background downloader
+          finalTarget = localPhotoUriOrBase64;
+        }
+      }
+
       if (Platform.OS === 'android' && TogetherlyWidgetModule?.updatePhoto) {
-        await TogetherlyWidgetModule.updatePhoto(localPhotoUriOrBase64, caption || 'Our Latest Moment');
+        await TogetherlyWidgetModule.updatePhoto(finalTarget, caption || 'Our Latest Moment');
       }
     } catch (e) {
       console.warn('Failed to update photo widget:', e);

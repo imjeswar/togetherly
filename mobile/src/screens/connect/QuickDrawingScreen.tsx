@@ -89,7 +89,7 @@ export const QuickDrawingScreen: React.FC = () => {
       </View>
 
       <View style={styles.canvasContainer}>
-        <Canvas height={420} onStrokesChange={setStrokes} />
+        <Canvas height={420} initialStrokes={strokes} onStrokesChange={setStrokes} />
       </View>
 
       <View style={styles.bottomBar}>

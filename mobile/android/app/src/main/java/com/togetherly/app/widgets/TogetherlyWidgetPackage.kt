@@ -15,3 +15,4 @@ class TogetherlyWidgetPackage : ReactPackage {
         return emptyList()
     }
 }
+

@@ -222,13 +222,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Handle AppState (background/foreground) transitions
     const handleAppStateChange = (nextState: AppStateStatus) => {
       if (nextState === 'active') {
+        socketService.sendHeartbeat();
         socketService.queryPresence();
         syncPendingDeliveries();
       }
     };
     const appStateSub = AppState.addEventListener('change', handleAppStateChange);
 
+    // Active foreground presence heartbeat (every 12 seconds)
+    const heartbeatTimer = setInterval(() => {
+      socketService.sendHeartbeat();
+    }, 12000);
+
     return () => {
+      clearInterval(heartbeatTimer);
       unsubStatus?.();
       unsubPresenceSync?.();
       unsubPartnerOnline?.();

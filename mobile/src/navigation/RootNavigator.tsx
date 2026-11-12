@@ -17,10 +17,22 @@ const linking = {
   config: {
     screens: {
       Pairing: 'pair',
-      Home: 'home',
-      QuickDrawing: 'draw/quick',
-      Drawing: 'draw/shared',
-      PhotoMoments: 'photos',
+      Home: {
+        path: 'home',
+        exact: true,
+      },
+      QuickDrawing: {
+        path: 'draw/quick',
+        alias: ['canvas/quick', 'quick-draw'],
+      },
+      Drawing: {
+        path: 'draw/shared',
+        alias: ['canvas/shared', 'drawing', 'canvas'],
+      },
+      PhotoMoments: {
+        path: 'photos',
+        alias: ['photo', 'moments'],
+      },
     },
   },
 };

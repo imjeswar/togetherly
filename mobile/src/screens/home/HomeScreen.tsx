@@ -144,9 +144,10 @@ export const HomeScreen: React.FC = () => {
       }
       if (photosRes.status === 'fulfilled' && photosRes.value?.photos) {
         setRecentPhotos(photosRes.value.photos);
-        if (photosRes.value.photos.length > 0) {
-          const p = photosRes.value.photos[0];
-          widgetBridge.updatePhotoWidget(resolveMediaUrl(p.photoUrl), p.caption);
+        // Find the latest photo RECEIVED from the partner
+        const partnerPhoto = photosRes.value.photos.find((p: any) => p.isFromPartner);
+        if (partnerPhoto?.photoUrl) {
+          widgetBridge.updatePhotoWidget(resolveMediaUrl(partnerPhoto.photoUrl), partnerPhoto.caption);
         }
       }
     } catch {}

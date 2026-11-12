@@ -67,6 +67,10 @@ export const PhotoMomentsScreen: React.FC = () => {
       const res = await api.getPhotosGallery();
       if (res?.photos) {
         setPhotos(res.photos);
+        const partnerPhoto = res.photos.find((p: any) => p.isFromPartner);
+        if (partnerPhoto?.photoUrl) {
+          widgetBridge.updatePhotoWidget(resolveMediaUrl(partnerPhoto.photoUrl), partnerPhoto.caption);
+        }
       }
     } catch {} finally {
       setLoading(false);

@@ -116,6 +116,14 @@ class SocketService {
         }
       });
 
+      this.socket.on('partner_online', (data) => {
+        this.dispatch('partner_online', data);
+      });
+
+      this.socket.on('partner_offline', (data) => {
+        this.dispatch('partner_offline', data);
+      });
+
       this.socket.on('disconnect', (reason) => {
         this.setStatus(reason === 'io client disconnect' ? 'disconnected' : 'error');
       });
@@ -188,6 +196,16 @@ class SocketService {
     const dId = deviceId || this.currentDeviceId;
     if (sId && dId) {
       this.socket?.emit('query_presence', { spaceId: sId, deviceId: dId });
+    }
+  }
+
+  sendHeartbeat() {
+    const sId = this.currentSpaceId;
+    const dId = this.currentDeviceId;
+    if (this.socket && this.socket.connected && sId && dId) {
+      this.socket.emit('presence_heartbeat', { spaceId: sId, deviceId: dId });
+    } else if (sId && dId && (!this.socket || !this.socket.connected)) {
+      this.connectSpace(sId, dId).catch(() => {});
     }
   }
 
