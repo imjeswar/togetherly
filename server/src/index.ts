@@ -51,6 +51,26 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 // Static uploads directory
 app.use('/uploads', express.static(path.resolve('uploads')));
 
+// Root landing & health status
+app.get('/', (_req, res) => {
+  res.json({
+    status: 'online',
+    app: 'Togetherly API Server',
+    tagline: 'A little moment. A stronger connection.',
+    database: 'Neon PostgreSQL (Connected)',
+    realtime: 'Socket.IO Active',
+    time: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      pairing: '/api/pairing',
+      dashboard: '/api/dashboard',
+      questions: '/api/questions',
+      chat: '/api/chat',
+    },
+  });
+});
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({

@@ -1,14 +1,15 @@
 import { Platform } from 'react-native';
 
 const isDev = __DEV__;
-// Active public tunnel endpoint (reachable via Wi-Fi and Cellular mobile data)
-const TUNNEL_URL = 'https://dry-eagles-take.loca.lt';
-// Local network IP address for direct Wi-Fi communication
+// Production Render Cloud Backend
+const PRODUCTION_API_URL = 'https://togetherly-api.onrender.com/api';
+const PRODUCTION_SOCKET_URL = 'https://togetherly-api.onrender.com';
+// Local network IP address for direct Wi-Fi fallback
 const LAN_IP_URL = 'http://192.168.1.5:5000';
 const DEV_LOCALHOST = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
 
-const defaultBaseUrl = process.env.EXPO_PUBLIC_API_URL || `${TUNNEL_URL}/api`;
-const defaultSocketUrl = process.env.EXPO_PUBLIC_SOCKET_URL || TUNNEL_URL;
+const defaultBaseUrl = process.env.EXPO_PUBLIC_API_URL || PRODUCTION_API_URL;
+const defaultSocketUrl = process.env.EXPO_PUBLIC_SOCKET_URL || PRODUCTION_SOCKET_URL;
 
 export const ENV = {
   API_BASE_URL: defaultBaseUrl,
