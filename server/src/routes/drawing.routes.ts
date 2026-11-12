@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../prisma.js';
 import { deviceAuthMiddleware, DeviceAuthRequest } from '../middleware/deviceAuth.js';
-import { getIO } from '../socket.js';
+import { getIO, isPartnerOnline } from '../socket.js';
 
 const router = Router();
 
@@ -31,14 +31,8 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
 
     // Check if partner is connected to space room
     const io = getIO();
-    let isPartnerOnline = false;
-    if (io) {
-      const room = io.sockets.adapter.rooms.get(`space_${spaceId}`);
-      // If room has > 1 socket (i.e. both partners connected), partner is online
-      isPartnerOnline = Boolean(room && room.size > 1);
-    }
-
-    const deliveryStatus = isPartnerOnline ? 'DELIVERED' : 'PENDING';
+    const partnerConnected = isPartnerOnline(spaceId, senderDeviceId);
+    const deliveryStatus = partnerConnected ? 'DELIVERED' : 'PENDING';
 
     // Create asynchronous DeliveryEvent
     const deliveryEvent = await prisma.deliveryEvent.create({
@@ -56,7 +50,7 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
           createdAt: drawing.createdAt,
         }),
         status: deliveryStatus,
-        deliveredAt: isPartnerOnline ? new Date() : null,
+        deliveredAt: partnerConnected ? new Date() : null,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days expiry
       },
     });
@@ -64,6 +58,8 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
     // If partner is online, broadcast immediately
     if (io) {
       io.to(`space_${spaceId}`).emit('incoming_drawing', {
+        id: drawing.id,
+        itemType: 'DRAWING',
         eventId: deliveryEvent.id,
         drawingId: drawing.id,
         title: drawing.title,
@@ -74,10 +70,11 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
         createdAt: drawing.createdAt,
       });
 
-      if (isPartnerOnline) {
+      if (partnerConnected) {
         // Emit delivery ack back to sender
         io.to(`device_${senderDeviceId}`).emit('delivery_status_update', {
           eventId: deliveryEvent.id,
+          drawingId: drawing.id,
           status: 'DELIVERED',
           deliveredAt: new Date(),
         });
@@ -114,6 +111,7 @@ router.get('/gallery', deviceAuthMiddleware, async (req: DeviceAuthRequest, res:
         senderDeviceId: true,
         mode: true,
         title: true,
+        canvasData: true,
         previewUrl: true,
         createdAt: true,
       },

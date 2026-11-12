@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { secureStorage } from '../services/secureStore';
 import { offlineStorage } from '../services/offlineStorage';
 import { api } from '../services/api';
@@ -97,9 +98,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (res.isPaired && res.partner) {
           setIsPaired(true);
           setPartner(res.partner);
+          if (typeof res.partner.isOnline === 'boolean') {
+            setPartnerOnline(res.partner.isOnline);
+          }
         } else {
           setIsPaired(false);
           setPartner(null);
+          setPartnerOnline(false);
           if (res.invitation?.code) {
             setInvitationCode(res.invitation.code);
             setInviteUrl(res.invitation.inviteUrl);
@@ -161,7 +166,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubStatus = socketService.onStatusChange((status) => {
       setSocketStatus(status);
       if (status === 'connected') {
+        socketService.queryPresence();
         syncPendingDeliveries();
+      }
+    });
+
+    const unsubPresenceSync = socketService.on('presence_sync', (data: any) => {
+      if (typeof data?.partnerOnline === 'boolean') {
+        setPartnerOnline(data.partnerOnline);
+        if (data.partnerOnline) {
+          syncPendingDeliveries();
+        }
       }
     });
 
@@ -192,12 +207,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsPaired(false);
     });
 
+    // Handle AppState (background/foreground) transitions
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        socketService.queryPresence();
+        syncPendingDeliveries();
+      }
+    };
+    const appStateSub = AppState.addEventListener('change', handleAppStateChange);
+
     return () => {
       unsubStatus?.();
+      unsubPresenceSync?.();
       unsubPartnerOnline?.();
       unsubPartnerOffline?.();
       unsubPartnerJoined?.();
       unsubSpaceUnpaired?.();
+      appStateSub.remove();
     };
   }, []);
 

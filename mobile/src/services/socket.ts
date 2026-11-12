@@ -96,10 +96,23 @@ class SocketService {
             spaceId: this.currentSpaceId,
             deviceId: this.currentDeviceId,
           });
+          this.socket?.emit('query_presence', {
+            spaceId: this.currentSpaceId,
+            deviceId: this.currentDeviceId,
+          });
         }
         if (this.currentRelationshipId) {
           this.socket?.emit('join_relationship', { relationshipId: this.currentRelationshipId });
           this.socket?.emit('couple:join', { relationshipId: this.currentRelationshipId });
+        }
+      });
+
+      this.socket.on('presence_sync', (data) => {
+        this.dispatch('presence_sync', data);
+        if (data?.partnerOnline) {
+          this.dispatch('partner_online', data);
+        } else if (data && data.partnerOnline === false) {
+          this.dispatch('partner_offline', data);
         }
       });
 
@@ -168,6 +181,14 @@ class SocketService {
 
   emit(event: string, data?: any) {
     this.socket?.emit(event, data);
+  }
+
+  queryPresence(spaceId?: string, deviceId?: string) {
+    const sId = spaceId || this.currentSpaceId;
+    const dId = deviceId || this.currentDeviceId;
+    if (sId && dId) {
+      this.socket?.emit('query_presence', { spaceId: sId, deviceId: dId });
+    }
   }
 
   disconnect() {

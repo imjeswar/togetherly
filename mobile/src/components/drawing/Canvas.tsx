@@ -1,10 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   PanResponder,
   StyleSheet,
   TouchableOpacity,
-  Text,
   GestureResponderEvent,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -21,9 +20,10 @@ interface CanvasProps {
   initialStrokes?: Stroke[];
   onStrokesChange?: (strokes: Stroke[]) => void;
   height?: number;
+  readOnly?: boolean;
 }
 
-const PALETTE = [
+export const PALETTE = [
   '#E8A0A8', // Romantic Rose
   '#D9B77E', // Warm Gold
   '#FFF8F5', // Soft White
@@ -32,12 +32,13 @@ const PALETTE = [
   '#38BDF8', // Starlight Sky
 ];
 
-const STROKE_WIDTHS = [2, 4, 8, 14];
+export const STROKE_WIDTHS = [2, 4, 8, 14];
 
 export const Canvas: React.FC<CanvasProps> = ({
   initialStrokes = [],
   onStrokesChange,
   height = 360,
+  readOnly = false,
 }) => {
   const [strokes, setStrokes] = useState<Stroke[]>(initialStrokes);
   const [redoStack, setRedoStack] = useState<Stroke[]>([]);
@@ -45,123 +46,181 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [currentWidth, setCurrentWidth] = useState<number>(4);
   const [currentPath, setCurrentPath] = useState<string>('');
 
+  // Critical Mutable Refs to prevent stale closure bugs in PanResponder
+  const strokesRef = useRef<Stroke[]>(initialStrokes);
+  const currentColorRef = useRef<string>(PALETTE[0]);
+  const currentWidthRef = useRef<number>(4);
   const currentPathRef = useRef<string>('');
 
+  // Keep refs in sync with state
+  strokesRef.current = strokes;
+  currentColorRef.current = currentColor;
+  currentWidthRef.current = currentWidth;
+
+  // Sync external initialStrokes when updated (e.g., from partner or DB fetch)
+  useEffect(() => {
+    if (initialStrokes && Array.isArray(initialStrokes)) {
+      setStrokes(initialStrokes);
+      strokesRef.current = initialStrokes;
+    }
+  }, [initialStrokes]);
+
+  // PanResponder constructed with refs so it always reads the fresh state
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => !readOnly,
+      onMoveShouldSetPanResponder: () => !readOnly,
       onPanResponderGrant: (evt: GestureResponderEvent) => {
+        if (readOnly) return;
         const { locationX, locationY } = evt.nativeEvent;
+        // Start stroke at touch point
         const d = `M${locationX.toFixed(1)},${locationY.toFixed(1)}`;
         currentPathRef.current = d;
         setCurrentPath(d);
       },
       onPanResponderMove: (evt: GestureResponderEvent) => {
+        if (readOnly) return;
         const { locationX, locationY } = evt.nativeEvent;
         const d = `${currentPathRef.current} L${locationX.toFixed(1)},${locationY.toFixed(1)}`;
         currentPathRef.current = d;
         setCurrentPath(d);
       },
       onPanResponderRelease: () => {
-        if (!currentPathRef.current) return;
+        if (readOnly || !currentPathRef.current) return;
+
+        // If tap without drag, create a tiny line so a dot or point is visible
+        let finalPath = currentPathRef.current;
+        if (!finalPath.includes('L')) {
+          const match = finalPath.match(/M([\d.-]+),([\d.-]+)/);
+          if (match) {
+            const x = parseFloat(match[1]);
+            const y = parseFloat(match[2]);
+            finalPath = `M${x.toFixed(1)},${y.toFixed(1)} L${(x + 0.5).toFixed(1)},${(y + 0.5).toFixed(1)}`;
+          }
+        }
+
         const newStroke: Stroke = {
-          path: currentPathRef.current,
-          color: currentColor,
-          width: currentWidth,
+          path: finalPath,
+          color: currentColorRef.current,
+          width: currentWidthRef.current,
         };
-        const updated = [...strokes, newStroke];
+
+        const updated = [...strokesRef.current, newStroke];
+        strokesRef.current = updated;
         setStrokes(updated);
         setRedoStack([]);
         currentPathRef.current = '';
         setCurrentPath('');
         onStrokesChange?.(updated);
       },
+      onPanResponderTerminate: () => {
+        currentPathRef.current = '';
+        setCurrentPath('');
+      },
     })
   ).current;
 
-  const handleUndo = () => {
-    if (strokes.length === 0) return;
-    const last = strokes[strokes.length - 1];
-    const updated = strokes.slice(0, strokes.length - 1);
+  const handleUndo = useCallback(() => {
+    if (strokesRef.current.length === 0) return;
+    const current = strokesRef.current;
+    const last = current[current.length - 1];
+    const updated = current.slice(0, current.length - 1);
+    strokesRef.current = updated;
     setStrokes(updated);
     setRedoStack((prev) => [last, ...prev]);
     onStrokesChange?.(updated);
-  };
+  }, [onStrokesChange]);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     if (redoStack.length === 0) return;
     const [next, ...rest] = redoStack;
-    const updated = [...strokes, next];
+    const updated = [...strokesRef.current, next];
+    strokesRef.current = updated;
     setStrokes(updated);
     setRedoStack(rest);
     onStrokesChange?.(updated);
-  };
+  }, [redoStack, onStrokesChange]);
 
-  const handleClear = () => {
-    if (strokes.length === 0) return;
+  const handleClear = useCallback(() => {
+    if (strokesRef.current.length === 0) return;
+    strokesRef.current = [];
     setStrokes([]);
     setRedoStack([]);
     currentPathRef.current = '';
     setCurrentPath('');
     onStrokesChange?.([]);
-  };
+  }, [onStrokesChange]);
 
   return (
     <View style={styles.container}>
       {/* Top Toolbar: Undo, Redo, Clear */}
-      <View style={styles.topToolbar}>
-        <View style={styles.row}>
-          <TouchableOpacity
-            onPress={handleUndo}
-            disabled={strokes.length === 0}
-            style={[styles.toolBtn, strokes.length === 0 && styles.disabled]}
-          >
-            <Undo2 size={18} color={strokes.length === 0 ? theme.colors.textMuted : theme.colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleRedo}
-            disabled={redoStack.length === 0}
-            style={[styles.toolBtn, redoStack.length === 0 && styles.disabled]}
-          >
-            <Redo2 size={18} color={redoStack.length === 0 ? theme.colors.textMuted : theme.colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleClear}
-            disabled={strokes.length === 0}
-            style={[styles.toolBtn, strokes.length === 0 && styles.disabled]}
-          >
-            <Trash2 size={18} color={strokes.length === 0 ? theme.colors.textMuted : theme.colors.error} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Brush sizes */}
-        <View style={styles.row}>
-          {STROKE_WIDTHS.map((w) => (
+      {!readOnly && (
+        <View style={styles.topToolbar}>
+          <View style={styles.row}>
             <TouchableOpacity
-              key={w}
-              onPress={() => setCurrentWidth(w)}
-              style={[styles.sizeBtn, currentWidth === w && styles.sizeBtnActive]}
+              onPress={handleUndo}
+              disabled={strokes.length === 0}
+              style={[styles.toolBtn, strokes.length === 0 && styles.disabled]}
             >
-              <View
-                style={{
-                  width: w + 4,
-                  height: w + 4,
-                  borderRadius: (w + 4) / 2,
-                  backgroundColor: currentWidth === w ? theme.colors.primary : theme.colors.textMuted,
-                }}
+              <Undo2
+                size={18}
+                color={strokes.length === 0 ? theme.colors.textMuted : theme.colors.textPrimary}
               />
             </TouchableOpacity>
-          ))}
+            <TouchableOpacity
+              onPress={handleRedo}
+              disabled={redoStack.length === 0}
+              style={[styles.toolBtn, redoStack.length === 0 && styles.disabled]}
+            >
+              <Redo2
+                size={18}
+                color={redoStack.length === 0 ? theme.colors.textMuted : theme.colors.textPrimary}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleClear}
+              disabled={strokes.length === 0}
+              style={[styles.toolBtn, strokes.length === 0 && styles.disabled]}
+            >
+              <Trash2
+                size={18}
+                color={strokes.length === 0 ? theme.colors.textMuted : theme.colors.error}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* Brush sizes */}
+          <View style={styles.row}>
+            {STROKE_WIDTHS.map((w) => (
+              <TouchableOpacity
+                key={w}
+                onPress={() => setCurrentWidth(w)}
+                style={[styles.sizeBtn, currentWidth === w && styles.sizeBtnActive]}
+              >
+                <View
+                  style={{
+                    width: w + 4,
+                    height: w + 4,
+                    borderRadius: (w + 4) / 2,
+                    backgroundColor:
+                      currentWidth === w ? theme.colors.primary : theme.colors.textMuted,
+                  }}
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Drawing Canvas Area */}
-      <View style={[styles.canvasArea, { height }]} {...panResponder.panHandlers}>
+      <View
+        style={[styles.canvasArea, { height }]}
+        {...(!readOnly ? panResponder.panHandlers : {})}
+      >
         <Svg style={StyleSheet.absoluteFill}>
           {strokes.map((s, idx) => (
             <Path
-              key={idx}
+              key={`stroke-${idx}`}
               d={s.path}
               stroke={s.color}
               strokeWidth={s.width}
@@ -184,19 +243,21 @@ export const Canvas: React.FC<CanvasProps> = ({
       </View>
 
       {/* Color Palette */}
-      <View style={styles.paletteRow}>
-        {PALETTE.map((c) => (
-          <TouchableOpacity
-            key={c}
-            onPress={() => setCurrentColor(c)}
-            style={[
-              styles.colorSwatch,
-              { backgroundColor: c },
-              currentColor === c && styles.colorSwatchActive,
-            ]}
-          />
-        ))}
-      </View>
+      {!readOnly && (
+        <View style={styles.paletteRow}>
+          {PALETTE.map((c) => (
+            <TouchableOpacity
+              key={c}
+              onPress={() => setCurrentColor(c)}
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: c },
+                currentColor === c && styles.colorSwatchActive,
+              ]}
+            />
+          ))}
+        </View>
+      )}
     </View>
   );
 };
@@ -267,4 +328,3 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.15 }],
   },
 });
-

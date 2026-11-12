@@ -32,6 +32,8 @@ dev.db-journal
 
 # Uploads & logs
 uploads/*
+server/uploads/*
+server/uploads
 !uploads/.gitkeep
 *.log
 npm-debug.log*

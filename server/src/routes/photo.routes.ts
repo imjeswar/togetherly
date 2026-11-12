@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from '../prisma.js';
 import { deviceAuthMiddleware, DeviceAuthRequest } from '../middleware/deviceAuth.js';
-import { getIO } from '../socket.js';
+import { getIO, isPartnerOnline } from '../socket.js';
 
 const router = Router();
 
@@ -67,13 +67,8 @@ router.post(
 
       // Check if partner is online
       const io = getIO();
-      let isPartnerOnline = false;
-      if (io) {
-        const room = io.sockets.adapter.rooms.get(`space_${spaceId}`);
-        isPartnerOnline = Boolean(room && room.size > 1);
-      }
-
-      const deliveryStatus = isPartnerOnline ? 'DELIVERED' : 'PENDING';
+      const partnerConnected = isPartnerOnline(spaceId, senderDeviceId);
+      const deliveryStatus = partnerConnected ? 'DELIVERED' : 'PENDING';
 
       // Save PhotoTransferMetadata
       const photo = await prisma.photoTransferMetadata.create({
@@ -102,7 +97,7 @@ router.post(
           }),
           mediaUrl: photo.photoUrl,
           status: deliveryStatus,
-          deliveredAt: isPartnerOnline ? new Date() : null,
+          deliveredAt: partnerConnected ? new Date() : null,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
@@ -110,6 +105,8 @@ router.post(
       // Broadcast live to partner if connected
       if (io) {
         io.to(`space_${spaceId}`).emit('incoming_photo', {
+          id: photo.id,
+          itemType: 'PHOTO',
           eventId: deliveryEvent.id,
           photoId: photo.id,
           photoUrl: photo.photoUrl,
@@ -119,9 +116,10 @@ router.post(
           createdAt: photo.createdAt,
         });
 
-        if (isPartnerOnline) {
+        if (partnerConnected) {
           io.to(`device_${senderDeviceId}`).emit('delivery_status_update', {
             eventId: deliveryEvent.id,
+            photoId: photo.id,
             status: 'DELIVERED',
             deliveredAt: new Date(),
           });

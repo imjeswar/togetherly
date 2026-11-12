@@ -33,11 +33,39 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { socketService } from '../../services/socket';
+import { offlineStorage } from '../../services/offlineStorage';
+import { ENV } from '../../config/env';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { FlameIcon } from '../../components/ui/FlameIcon';
+import { Stroke } from '../../components/drawing/Canvas';
+import Svg, { Path } from 'react-native-svg';
 import { theme } from '../../config/theme';
+
+function parseStrokes(canvasData: any): Stroke[] {
+  if (!canvasData) return [];
+  if (Array.isArray(canvasData)) return canvasData;
+  if (typeof canvasData === 'string') {
+    try {
+      const parsed = JSON.parse(canvasData);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function resolveMediaUrl(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const base = ENV.API_BASE_URL.replace(/\/api\/?$/, '');
+  const clean = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${clean}`;
+}
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -60,6 +88,15 @@ export const HomeScreen: React.FC = () => {
   const [previewItem, setPreviewItem] = useState<any | null>(null);
 
   const loadRecentContent = useCallback(async () => {
+    // 1. Instantly show SQLite cached content while network loads
+    try {
+      const cached = await offlineStorage.getCachedDrawings();
+      if (cached && cached.length > 0) {
+        setRecentDrawings(cached);
+      }
+    } catch {}
+
+    // 2. Fetch fresh gallery from cloud
     try {
       const [drawingsRes, photosRes] = await Promise.allSettled([
         api.getDrawingsGallery(),
@@ -68,6 +105,12 @@ export const HomeScreen: React.FC = () => {
 
       if (drawingsRes.status === 'fulfilled' && drawingsRes.value?.drawings) {
         setRecentDrawings(drawingsRes.value.drawings);
+        // Persist to local SQLite
+        for (const d of drawingsRes.value.drawings) {
+          if (d.canvasData) {
+            await offlineStorage.saveDrawingDraft(d.id, d.title || 'Drawing', d.canvasData, d.previewUrl);
+          }
+        }
       }
       if (photosRes.status === 'fulfilled' && photosRes.value?.photos) {
         setRecentPhotos(photosRes.value.photos);
@@ -79,18 +122,35 @@ export const HomeScreen: React.FC = () => {
     loadRecentContent();
 
     // Listen to real-time incoming drawings and photos
-    const unsubDrawing = socketService.on('incoming_drawing', (drawing: any) => {
-      setRecentDrawings((prev) => [
-        { ...drawing, isFromPartner: true, createdAt: new Date().toISOString() },
-        ...prev,
-      ]);
+    const unsubDrawing = socketService.on('incoming_drawing', async (drawing: any) => {
+      const formatted = {
+        ...drawing,
+        id: drawing.drawingId || drawing.id || `draw_${Date.now()}`,
+        isFromPartner: true,
+        itemType: 'DRAWING',
+        createdAt: drawing.createdAt || new Date().toISOString(),
+      };
+      setRecentDrawings((prev) => [formatted, ...prev]);
+
+      if (drawing.canvasData) {
+        await offlineStorage.saveDrawingDraft(
+          formatted.id,
+          drawing.title || 'Partner Drawing',
+          drawing.canvasData,
+          drawing.previewUrl
+        );
+      }
     });
 
     const unsubPhoto = socketService.on('incoming_photo', (photo: any) => {
-      setRecentPhotos((prev) => [
-        { ...photo, isFromPartner: true, createdAt: new Date().toISOString() },
-        ...prev,
-      ]);
+      const formatted = {
+        ...photo,
+        id: photo.photoId || photo.id || `photo_${Date.now()}`,
+        isFromPartner: true,
+        itemType: 'PHOTO',
+        createdAt: photo.createdAt || new Date().toISOString(),
+      };
+      setRecentPhotos((prev) => [formatted, ...prev]);
     });
 
     return () => {
@@ -256,40 +316,62 @@ export const HomeScreen: React.FC = () => {
           </View>
         ) : (
           <View style={styles.gridContainer}>
-            {combinedFeed.map((item, index) => (
-              <TouchableOpacity
-                key={item.id || index}
-                style={styles.gridItem}
-                activeOpacity={0.85}
-                onPress={() => setPreviewItem(item)}
-              >
-                {item.previewUrl || item.photoUrl ? (
-                  <Image
-                    source={{ uri: item.photoUrl || item.previewUrl }}
-                    style={styles.gridImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.gridPlaceholder}>
-                    <PenTool size={24} color={theme.colors.primary} />
-                  </View>
-                )}
+            {combinedFeed.map((item, index) => {
+              const strokes = parseStrokes(item.canvasData);
+              const hasStrokes = strokes.length > 0;
+              const mediaUri = resolveMediaUrl(item.photoUrl || item.previewUrl);
 
-                <View style={styles.gridOverlay}>
-                  <View style={styles.typeBadge}>
-                    <Text style={styles.typeBadgeText}>
-                      {item.itemType === 'DRAWING' ? 'Drawing' : 'Photo'}
+              return (
+                <TouchableOpacity
+                  key={item.id || index}
+                  style={styles.gridItem}
+                  activeOpacity={0.85}
+                  onPress={() => setPreviewItem(item)}
+                >
+                  {hasStrokes ? (
+                    <View style={styles.gridCanvasBox}>
+                      <Svg viewBox="0 0 360 360" style={StyleSheet.absoluteFill}>
+                        {strokes.map((s, idx) => (
+                          <Path
+                            key={`grid-s-${idx}`}
+                            d={s.path}
+                            stroke={s.color}
+                            strokeWidth={Math.max(2, s.width * 0.9)}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            fill="none"
+                          />
+                        ))}
+                      </Svg>
+                    </View>
+                  ) : mediaUri ? (
+                    <Image
+                      source={{ uri: mediaUri }}
+                      style={styles.gridImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.gridPlaceholder}>
+                      <PenTool size={24} color={theme.colors.primary} />
+                    </View>
+                  )}
+
+                  <View style={styles.gridOverlay}>
+                    <View style={styles.typeBadge}>
+                      <Text style={styles.typeBadgeText}>
+                        {item.itemType === 'DRAWING' ? 'Drawing' : 'Photo'}
+                      </Text>
+                    </View>
+                    <Text style={styles.gridTime}>
+                      {new Date(item.createdAt).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
                     </Text>
                   </View>
-                  <Text style={styles.gridTime}>
-                    {new Date(item.createdAt).toLocaleDateString([], {
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -299,22 +381,52 @@ export const HomeScreen: React.FC = () => {
         <View style={styles.previewBackdrop}>
           <SafeAreaView style={{ flex: 1 }}>
             <View style={styles.previewHeader}>
-              <Text style={styles.previewTitle}>
-                {previewItem?.title || (previewItem?.itemType === 'DRAWING' ? 'Drawing' : 'Photo')}
-              </Text>
+              <View>
+                <Text style={styles.previewTitle}>
+                  {previewItem?.title || (previewItem?.itemType === 'DRAWING' ? 'Sweet Drawing' : 'Photo Moment')}
+                </Text>
+                <Text style={styles.previewSubtitle}>
+                  {previewItem?.isFromPartner
+                    ? `From ${partner?.nickname || 'Partner'}`
+                    : 'Sent by You'}
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setPreviewItem(null)} style={styles.closeBtn}>
                 <X size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.previewBody}>
-              {previewItem?.photoUrl || previewItem?.previewUrl ? (
+              {previewItem?.canvasData && parseStrokes(previewItem.canvasData).length > 0 ? (
+                <View style={styles.fullDrawingContainer}>
+                  <Svg viewBox="0 0 360 420" style={StyleSheet.absoluteFill}>
+                    {parseStrokes(previewItem.canvasData).map((s, idx) => (
+                      <Path
+                        key={`modal-s-${idx}`}
+                        d={s.path}
+                        stroke={s.color}
+                        strokeWidth={s.width}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        fill="none"
+                      />
+                    ))}
+                  </Svg>
+                </View>
+              ) : previewItem?.photoUrl || previewItem?.previewUrl ? (
                 <Image
-                  source={{ uri: previewItem.photoUrl || previewItem.previewUrl }}
+                  source={{ uri: resolveMediaUrl(previewItem.photoUrl || previewItem.previewUrl) }}
                   style={styles.previewFullImage}
                   resizeMode="contain"
                 />
-              ) : null}
+              ) : (
+                <View style={styles.centerNotice}>
+                  <PenTool size={42} color={theme.colors.primary} />
+                  <Text style={styles.emptyNoticeText}>
+                    A sweet doodle from {partner?.nickname || 'your partner'}
+                  </Text>
+                </View>
+              )}
               {previewItem?.caption ? (
                 <Text style={styles.previewCaption}>{previewItem.caption}</Text>
               ) : null}
@@ -574,6 +686,36 @@ const styles = StyleSheet.create({
   gridImage: {
     width: '100%',
     height: '100%',
+  },
+  gridCanvasBox: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#16121C',
+  },
+  fullDrawingContainer: {
+    width: '100%',
+    height: 420,
+    backgroundColor: '#16121C',
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  previewSubtitle: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  centerNotice: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    gap: 12,
+  },
+  emptyNoticeText: {
+    color: theme.colors.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
   },
   gridPlaceholder: {
     flex: 1,

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma.js';
 import { deviceAuthMiddleware, DeviceAuthRequest } from '../middleware/deviceAuth.js';
-import { getIO } from '../socket.js';
+import { getIO, isDeviceOnline } from '../socket.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'togetherly-secret-key-couples-platform-2026-super-secure';
@@ -304,6 +304,15 @@ router.get('/status', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: 
     const selfDevice = space.devices.find((d) => d.deviceId === req.device!.deviceId);
     const partnerDevice = space.devices.find((d) => d.deviceId !== req.device!.deviceId);
     const isPaired = Boolean(partnerDevice);
+    const partnerIsOnline = partnerDevice ? isDeviceOnline(space.id, partnerDevice.deviceId) : false;
+
+    // Asynchronously refresh self device lastActiveAt
+    prisma.pairedDevice
+      .updateMany({
+        where: { deviceId: req.device!.deviceId, spaceId: space.id },
+        data: { lastActiveAt: new Date() },
+      })
+      .catch(() => {});
 
     const clientUrl = process.env.CLIENT_URL || 'https://togetherly-ruby-pi.vercel.app';
     const activeInvitation = space.invitations[0]
@@ -328,7 +337,12 @@ router.get('/status', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: 
       daysTogether,
       isPaired,
       device: selfDevice,
-      partner: partnerDevice || null,
+      partner: partnerDevice
+        ? {
+            ...partnerDevice,
+            isOnline: partnerIsOnline,
+          }
+        : null,
       invitation: activeInvitation,
     });
   } catch (error: any) {

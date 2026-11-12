@@ -1,9 +1,60 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
+import { prisma } from './prisma.js';
 
 let ioInstance: SocketIOServer | null = null;
 const JWT_SECRET = process.env.JWT_SECRET || 'togetherly-secret-key-couples-platform-2026-super-secure';
+
+// In-memory presence tracker: spaceId -> (deviceId -> Set<socketId>)
+const spacePresence = new Map<string, Map<string, Set<string>>>();
+
+function addDeviceSocket(spaceId: string, deviceId: string, socketId: string) {
+  if (!spacePresence.has(spaceId)) {
+    spacePresence.set(spaceId, new Map());
+  }
+  const spaceDevices = spacePresence.get(spaceId)!;
+  if (!spaceDevices.has(deviceId)) {
+    spaceDevices.set(deviceId, new Set());
+  }
+  spaceDevices.get(deviceId)!.add(socketId);
+}
+
+function removeDeviceSocket(spaceId: string, deviceId: string, socketId: string): boolean {
+  const spaceDevices = spacePresence.get(spaceId);
+  if (!spaceDevices) return true; // already offline
+
+  const deviceSockets = spaceDevices.get(deviceId);
+  if (deviceSockets) {
+    deviceSockets.delete(socketId);
+    if (deviceSockets.size === 0) {
+      spaceDevices.delete(deviceId);
+      if (spaceDevices.size === 0) {
+        spacePresence.delete(spaceId);
+      }
+      return true; // device is now fully offline
+    }
+  }
+  return false; // device still has other active sockets
+}
+
+export function isDeviceOnline(spaceId: string, deviceId: string): boolean {
+  const spaceDevices = spacePresence.get(spaceId);
+  if (!spaceDevices) return false;
+  const sockets = spaceDevices.get(deviceId);
+  return Boolean(sockets && sockets.size > 0);
+}
+
+export function isPartnerOnline(spaceId: string, selfDeviceId: string): boolean {
+  const spaceDevices = spacePresence.get(spaceId);
+  if (!spaceDevices) return false;
+  for (const [devId, sockets] of spaceDevices.entries()) {
+    if (devId !== selfDeviceId && sockets.size > 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function setupSocketIO(server: HTTPServer) {
   const io = new SocketIOServer(server, {
@@ -13,6 +64,8 @@ export function setupSocketIO(server: HTTPServer) {
       credentials: true,
     },
     transports: ['websocket', 'polling'],
+    pingInterval: 10000,
+    pingTimeout: 15000,
   });
 
   ioInstance = io;
@@ -21,6 +74,51 @@ export function setupSocketIO(server: HTTPServer) {
     let currentDeviceId: string | null = null;
     let currentSpaceId: string | null = null;
     let legacyUserId: string | null = null;
+
+    // Helper: join space and synchronize presence bidirectionally
+    const handleJoinSpace = (spaceId: string, deviceId: string) => {
+      currentSpaceId = spaceId;
+      currentDeviceId = deviceId;
+
+      socket.join(`space_${spaceId}`);
+      socket.join(`device_${deviceId}`);
+
+      // Track presence
+      addDeviceSocket(spaceId, deviceId, socket.id);
+
+      // 1. Tell OTHER devices in space that this device is ONLINE
+      socket.to(`space_${spaceId}`).emit('partner_online', {
+        deviceId,
+        spaceId,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 2. Check if partner device is ALREADY online and tell THIS device immediately
+      const partnerIsOnline = isPartnerOnline(spaceId, deviceId);
+      socket.emit('presence_sync', {
+        partnerOnline: partnerIsOnline,
+        spaceId,
+        deviceId,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (partnerIsOnline) {
+        socket.emit('partner_online', {
+          spaceId,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      socket.emit('auth_success', { deviceId, spaceId });
+
+      // Update lastActiveAt in database asynchronously
+      prisma.pairedDevice
+        .updateMany({
+          where: { deviceId, spaceId },
+          data: { lastActiveAt: new Date() },
+        })
+        .catch(() => {});
+    };
 
     // Authenticate handshake if token provided
     const authHeader = socket.handshake.headers['authorization'];
@@ -32,12 +130,7 @@ export function setupSocketIO(server: HTTPServer) {
       try {
         const decoded = jwt.verify(rawToken, JWT_SECRET) as any;
         if (decoded.deviceId && decoded.spaceId) {
-          currentDeviceId = decoded.deviceId;
-          currentSpaceId = decoded.spaceId;
-          socket.join(`space_${currentSpaceId}`);
-          socket.join(`device_${currentDeviceId}`);
-          socket.to(`space_${currentSpaceId}`).emit('partner_online', { deviceId: currentDeviceId });
-          socket.emit('auth_success', { deviceId: currentDeviceId, spaceId: currentSpaceId });
+          handleJoinSpace(decoded.spaceId, decoded.deviceId);
         } else if (decoded.userId) {
           legacyUserId = decoded.userId;
           socket.join(`user_${legacyUserId}`);
@@ -47,24 +140,32 @@ export function setupSocketIO(server: HTTPServer) {
       }
     }
 
-    // 1. ANONYMOUS DEVICE SPACE JOIN
+    // 1. EXPLICIT ANONYMOUS DEVICE SPACE JOIN
     socket.on('join_space', ({ spaceId, deviceId }: { spaceId?: string; deviceId?: string }) => {
       const resolvedSpaceId = spaceId || currentSpaceId;
       const resolvedDeviceId = deviceId || currentDeviceId;
 
-      if (resolvedSpaceId) {
-        currentSpaceId = resolvedSpaceId;
-        socket.join(`space_${resolvedSpaceId}`);
-        socket.to(`space_${resolvedSpaceId}`).emit('partner_online', { deviceId: resolvedDeviceId });
-      }
-
-      if (resolvedDeviceId) {
-        currentDeviceId = resolvedDeviceId;
-        socket.join(`device_${resolvedDeviceId}`);
+      if (resolvedSpaceId && resolvedDeviceId) {
+        handleJoinSpace(resolvedSpaceId, resolvedDeviceId);
       }
     });
 
-    // 2. REAL-TIME SHARED CANVAS STROKE SYNCHRONIZATION
+    // 2. EXPLICIT PRESENCE QUERY / HEARTBEAT
+    socket.on('query_presence', ({ spaceId, deviceId }: { spaceId?: string; deviceId?: string }) => {
+      const targetSpace = spaceId || currentSpaceId;
+      const targetDevice = deviceId || currentDeviceId;
+      if (targetSpace && targetDevice) {
+        const partnerIsOnline = isPartnerOnline(targetSpace, targetDevice);
+        socket.emit('presence_sync', {
+          partnerOnline: partnerIsOnline,
+          spaceId: targetSpace,
+          deviceId: targetDevice,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // 3. REAL-TIME SHARED CANVAS STROKE SYNCHRONIZATION
     socket.on('shared_canvas_stroke', ({ spaceId, stroke, deviceId }: any) => {
       const targetSpace = spaceId || currentSpaceId;
       if (targetSpace) {
@@ -84,7 +185,7 @@ export function setupSocketIO(server: HTTPServer) {
       }
     });
 
-    // 3. DRAWING & PHOTO NOTIFICATIONS
+    // 4. DRAWING & PHOTO NOTIFICATIONS
     socket.on('drawing_sent', ({ spaceId, drawing }: any) => {
       const targetSpace = spaceId || currentSpaceId;
       if (targetSpace) {
@@ -99,7 +200,7 @@ export function setupSocketIO(server: HTTPServer) {
       }
     });
 
-    // 4. DELIVERY STATUS & SEEN CONFIRMATION
+    // 5. DELIVERY STATUS & SEEN CONFIRMATION
     socket.on('delivery_ack', ({ eventId, senderDeviceId }: any) => {
       if (senderDeviceId) {
         socket.to(`device_${senderDeviceId}`).emit('delivery_status_update', {
@@ -120,7 +221,7 @@ export function setupSocketIO(server: HTTPServer) {
       }
     });
 
-    // --- LEGACY CHANNELS (Safe compatibility during transition) ---
+    // --- LEGACY CHANNELS (Safe compatibility) ---
     const handleLegacyJoin = ({ relationshipId, userId }: { relationshipId?: string; userId?: string }) => {
       if (relationshipId) {
         socket.join(`rel_${relationshipId}`);
@@ -133,9 +234,24 @@ export function setupSocketIO(server: HTTPServer) {
     socket.on('join_relationship', handleLegacyJoin);
     socket.on('couple:join', handleLegacyJoin);
 
+    // 6. DISCONNECTION LIFECYCLE
     socket.on('disconnect', () => {
       if (currentSpaceId && currentDeviceId) {
-        socket.to(`space_${currentSpaceId}`).emit('partner_offline', { deviceId: currentDeviceId });
+        const fullyOffline = removeDeviceSocket(currentSpaceId, currentDeviceId, socket.id);
+        if (fullyOffline) {
+          socket.to(`space_${currentSpaceId}`).emit('partner_offline', {
+            deviceId: currentDeviceId,
+            spaceId: currentSpaceId,
+            timestamp: new Date().toISOString(),
+          });
+
+          prisma.pairedDevice
+            .updateMany({
+              where: { deviceId: currentDeviceId, spaceId: currentSpaceId },
+              data: { lastActiveAt: new Date() },
+            })
+            .catch(() => {});
+        }
       }
       if (legacyUserId) {
         io.emit('partner_offline', { userId: legacyUserId });

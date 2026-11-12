@@ -45,7 +45,11 @@ export const DrawingScreen: React.FC = () => {
     // Listen to partner strokes
     const unsubStroke = socketService.on('shared_canvas_stroke', (data: any) => {
       if (data?.stroke && data.deviceId !== deviceId) {
-        setStrokes((prev) => [...prev, data.stroke]);
+        setStrokes((prev) => {
+          const updated = [...prev, data.stroke];
+          strokesRef.current = updated;
+          return updated;
+        });
         setPartnerDrawing(true);
         setTimeout(() => setPartnerDrawing(false), 2000);
       }
@@ -54,6 +58,7 @@ export const DrawingScreen: React.FC = () => {
     // Listen to canvas clear
     const unsubClear = socketService.on('shared_canvas_clear', (data: any) => {
       if (data?.deviceId !== deviceId) {
+        strokesRef.current = [];
         setStrokes([]);
       }
     });
@@ -93,14 +98,19 @@ export const DrawingScreen: React.FC = () => {
   // When user finishes a stroke on their device
   const handleStrokesChange = (newStrokes: Stroke[]) => {
     if (newStrokes.length > strokesRef.current.length) {
-      // Latest stroke added
-      const lastStroke = newStrokes[newStrokes.length - 1];
-      socketService.emit('shared_canvas_stroke', {
-        spaceId,
-        deviceId,
-        stroke: lastStroke,
+      // Newly added stroke(s)
+      const addedStrokes = newStrokes.slice(strokesRef.current.length);
+      addedStrokes.forEach((stroke) => {
+        socketService.emit('shared_canvas_stroke', {
+          spaceId,
+          deviceId,
+          stroke,
+        });
       });
+    } else if (newStrokes.length === 0 && strokesRef.current.length > 0) {
+      socketService.emit('shared_canvas_clear', { spaceId, deviceId });
     }
+    strokesRef.current = newStrokes;
     setStrokes(newStrokes);
   };
 

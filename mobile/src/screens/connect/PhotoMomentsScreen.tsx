@@ -32,9 +32,20 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { socketService } from '../../services/socket';
 import { offlineStorage } from '../../services/offlineStorage';
+import { ENV } from '../../config/env';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { theme } from '../../config/theme';
+
+function resolveMediaUrl(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  const base = ENV.API_BASE_URL.replace(/\/api\/?$/, '');
+  const clean = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${clean}`;
+}
 
 export const PhotoMomentsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -304,7 +315,11 @@ export const PhotoMomentsScreen: React.FC = () => {
                 activeOpacity={0.88}
                 onPress={() => setFullViewPhoto(item)}
               >
-                <Image source={{ uri: item.photoUrl }} style={styles.photoThumb} resizeMode="cover" />
+                <Image
+                  source={{ uri: resolveMediaUrl(item.photoUrl) }}
+                  style={styles.photoThumb}
+                  resizeMode="cover"
+                />
                 <View style={styles.photoOverlay}>
                   <View style={styles.statusPill}>
                     {item.deliveryStatus === 'SEEN' ? (
@@ -344,7 +359,7 @@ export const PhotoMomentsScreen: React.FC = () => {
             <View style={styles.fullViewBody}>
               {fullViewPhoto?.photoUrl && (
                 <Image
-                  source={{ uri: fullViewPhoto.photoUrl }}
+                  source={{ uri: resolveMediaUrl(fullViewPhoto.photoUrl) }}
                   style={styles.fullImage}
                   resizeMode="contain"
                 />
