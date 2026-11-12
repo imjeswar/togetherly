@@ -1,4 +1,4 @@
-const BASE_URL = '/api';
+export const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('togetherly_token');
@@ -44,6 +44,7 @@ export const api = {
   },
 
   pairing: {
+    getCode: () => request<any>('/pairing/code'),
     createSpace: (body: any = {}) => request<any>('/pairing/create-space', { method: 'POST', body: JSON.stringify(body) }),
     preview: (code: string) => request<any>('/pairing/preview', { method: 'POST', body: JSON.stringify({ code }) }),
     joinSpace: (code: string) => request<any>('/pairing/join-space', { method: 'POST', body: JSON.stringify({ code }) }),

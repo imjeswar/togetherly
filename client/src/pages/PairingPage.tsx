@@ -54,6 +54,20 @@ export const PairingPage: React.FC = () => {
     }
   }, [searchParams]);
 
+  // Fetch existing space code if available
+  useEffect(() => {
+    if (!isPaired) {
+      api.pairing.getCode().then((data: any) => {
+        if (data?.code) {
+          setCreatedCode(data.code);
+          if (data.inviteUrl) setInviteUrl(data.inviteUrl);
+        }
+      }).catch(() => {
+        // No active space code yet
+      });
+    }
+  }, [isPaired]);
+
   // Listen to Socket.IO real-time partner pairing event
   useEffect(() => {
     const socket = getSocket();

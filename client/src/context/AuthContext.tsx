@@ -74,8 +74,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('togetherly_token', data.token);
     }
     setUser(data.user);
-    setRelationship(null);
+    setRelationship(data.relationship || data.user?.relationship || null);
     setPartner(null);
+    if (data.relationship?.id || data.user?.relationshipId) {
+      joinRelationshipRoom(data.relationship?.id || data.user?.relationshipId, data.user.id);
+    }
   };
 
   const logout = async () => {

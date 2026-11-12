@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { api, BASE_URL } from '../services/api';
 import { GlassCard } from '../components/ui/GlassCard';
 import { Modal } from '../components/ui/Modal';
 import { CandleFlame } from '../components/ui/CandleFlame';
@@ -98,7 +98,7 @@ export const ProfilePage: React.FC = () => {
   const handleExportData = async () => {
     setExporting(true);
     try {
-      const response = await fetch('/api/settings/export', {
+      const response = await fetch(`${BASE_URL}/settings/export`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('togetherly_token') || ''}`,
         },
