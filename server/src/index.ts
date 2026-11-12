@@ -76,6 +76,15 @@ app.get('/', (_req, res) => {
 });
 
 // Health check
+app.get('/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    app: 'Togetherly API',
+    tagline: 'A little moment. A stronger connection.',
+    time: new Date().toISOString(),
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
