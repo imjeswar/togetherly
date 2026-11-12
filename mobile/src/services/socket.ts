@@ -11,6 +11,8 @@ class SocketService {
   private statusListeners: Set<(status: SocketStatus) => void> = new Set();
   private currentStatus: SocketStatus = 'disconnected';
   private currentRelationshipId: string | null = null;
+  private currentSpaceId: string | null = null;
+  private currentDeviceId: string | null = null;
 
   getStatus(): SocketStatus {
     return this.currentStatus;
@@ -33,6 +35,16 @@ class SocketService {
     return () => {
       this.statusListeners.delete(callback);
     };
+  }
+
+  async connectSpace(spaceId: string, deviceId: string): Promise<Socket | null> {
+    this.currentSpaceId = spaceId;
+    this.currentDeviceId = deviceId;
+    const sock = await this.connect();
+    if (sock && sock.connected) {
+      sock.emit('join_space', { spaceId, deviceId });
+    }
+    return sock;
   }
 
   async connect(relationshipId?: string): Promise<Socket | null> {
@@ -79,6 +91,12 @@ class SocketService {
 
       this.socket.on('connect', () => {
         this.setStatus('connected');
+        if (this.currentSpaceId) {
+          this.socket?.emit('join_space', {
+            spaceId: this.currentSpaceId,
+            deviceId: this.currentDeviceId,
+          });
+        }
         if (this.currentRelationshipId) {
           this.socket?.emit('join_relationship', { relationshipId: this.currentRelationshipId });
           this.socket?.emit('couple:join', { relationshipId: this.currentRelationshipId });

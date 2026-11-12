@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,182 +9,353 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Modal,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { ArrowLeft, Camera, Image as ImageIcon, Sparkles, CheckCircle2 } from 'lucide-react-native';
+import * as Sharing from 'expo-sharing';
+import {
+  ArrowLeft,
+  Camera,
+  Image as ImageIcon,
+  Send,
+  X,
+  Check,
+  CheckCheck,
+  Clock,
+  Download,
+  Sparkles,
+} from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import { useCouple } from '../../context/CoupleContext';
 import { api } from '../../services/api';
-import { Card } from '../../components/ui/Card';
+import { socketService } from '../../services/socket';
+import { offlineStorage } from '../../services/offlineStorage';
+import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { Avatar } from '../../components/ui/Avatar';
-import { Badge } from '../../components/ui/Badge';
 import { theme } from '../../config/theme';
 
 export const PhotoMomentsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { user } = useAuth();
-  const { partner } = useCouple();
+  const { partner, partnerOnline, deviceId } = useAuth();
 
-  const [challengePrompt, setChallengePrompt] = useState('Show me what you are seeing right now');
   const [photos, setPhotos] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+  const [selectedBase64, setSelectedBase64] = useState<string | null>(null);
+  const [caption, setCaption] = useState<string>('');
+  const [sending, setSending] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<'IDLE' | 'SENDING' | 'SENT' | 'DELIVERED'>('IDLE');
+  const [fullViewPhoto, setFullViewPhoto] = useState<any | null>(null);
 
-  useEffect(() => {
-    loadChallenge();
-  }, []);
-
-  const loadChallenge = async () => {
-    setLoading(true);
+  const loadPhotos = useCallback(async () => {
     try {
-      const res = await api.getPhotoChallenge();
-      if (res?.prompt) setChallengePrompt(res.prompt);
-      if (Array.isArray(res?.photos)) setPhotos(res.photos);
+      setLoading(true);
+      const res = await api.getPhotosGallery();
+      if (res?.photos) {
+        setPhotos(res.photos);
+      }
     } catch {} finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleCapture = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission Denied', 'Camera access is required to capture intimate photo moments.');
-      return;
-    }
+  useEffect(() => {
+    loadPhotos();
 
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
+    // Listen to real-time incoming photo from partner
+    const unsubPhoto = socketService.on('incoming_photo', (photo: any) => {
+      setPhotos((prev) => [
+        { ...photo, isFromPartner: true, deliveryStatus: 'DELIVERED', createdAt: new Date().toISOString() },
+        ...prev,
+      ]);
+      // Mark seen automatically when in photo screen
+      if (photo?.photoId) {
+        api.markPhotoSeen(photo.photoId).catch(() => {});
+      }
     });
 
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      await processAndUploadPhoto(result.assets[0].uri);
-    }
-  };
-
-  const handlePickGallery = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission Denied', 'Gallery access is required to share photos.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
+    // Listen to delivery status update
+    const unsubStatus = socketService.on('delivery_status_update', (update: any) => {
+      if (update?.status) {
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === update.photoId ? { ...p, deliveryStatus: update.status } : p))
+        );
+      }
     });
 
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      await processAndUploadPhoto(result.assets[0].uri);
-    }
-  };
+    return () => {
+      unsubPhoto?.();
+      unsubStatus?.();
+    };
+  }, [loadPhotos]);
 
-  const processAndUploadPhoto = async (uri: string) => {
-    setUploading(true);
+  // Compress and prepare image
+  const processImage = async (uri: string) => {
     try {
-      // Compress & optimize image for mobile
-      const manipulated = await ImageManipulator.manipulateAsync(
+      const manipResult = await ImageManipulator.manipulateAsync(
         uri,
-        [{ resize: { width: 1000 } }],
-        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        [{ resize: { width: 1200 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
 
-      const photoUrl = `data:image/jpeg;base64,${manipulated.base64}`;
+      setSelectedImageUri(manipResult.uri);
+      setSelectedBase64(`data:image/jpeg;base64,${manipResult.base64}`);
+    } catch (err) {
+      setSelectedImageUri(uri);
+    }
+  };
 
-      await api.uploadPhoto({
-        photoUrl,
-        prompt: challengePrompt,
-        caption: 'Daily photo snap',
+  // Camera Capture
+  const handleLaunchCamera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission Denied', 'Camera permission is required to capture photos.');
+      return;
+    }
+
+    const res = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.85,
+    });
+
+    if (!res.canceled && res.assets && res.assets[0]?.uri) {
+      await processImage(res.assets[0].uri);
+    }
+  };
+
+  // Gallery Picker
+  const handlePickFromGallery = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission Denied', 'Media library access is needed to select photos.');
+      return;
+    }
+
+    const res = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      quality: 0.85,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    });
+
+    if (!res.canceled && res.assets && res.assets[0]?.uri) {
+      await processImage(res.assets[0].uri);
+    }
+  };
+
+  // Send Photo to Partner
+  const handleSendPhoto = async () => {
+    if (!selectedBase64 && !selectedImageUri) return;
+
+    setSending(true);
+    setDeliveryStatus('SENDING');
+    const eventId = `photo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    try {
+      const res = await api.sendInstantPhoto({
+        photoData: selectedBase64 || selectedImageUri!,
+        caption: caption.trim() || undefined,
+        eventId,
       });
 
-      Alert.alert('Photo Shared!', 'Your photo moment has been safely shared with your partner.');
-      await loadChallenge();
-    } catch {
-      Alert.alert('Queued for Sync', 'Your photo has been captured and queued to upload once connection is restored.');
+      const newPhoto = res?.photo || {
+        id: res?.photoId || eventId,
+        photoUrl: res?.photoUrl || selectedImageUri,
+        caption: caption.trim(),
+        deliveryStatus: res?.deliveryStatus || (partnerOnline ? 'DELIVERED' : 'SENT'),
+        createdAt: new Date().toISOString(),
+        isFromPartner: false,
+      };
+
+      setPhotos((prev) => [newPhoto, ...prev]);
+      setSelectedImageUri(null);
+      setSelectedBase64(null);
+      setCaption('');
+
+      if (res?.deliveryStatus === 'DELIVERED') {
+        Alert.alert('Delivered! 📸', `Photo delivered to ${partner?.nickname || 'your partner'}!`);
+      } else {
+        Alert.alert(
+          'Sent! 💌',
+          `${partner?.nickname || 'Your partner'} is currently offline. The photo will arrive as soon as they reconnect.`
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to send photo.');
     } finally {
-      setUploading(false);
+      setSending(false);
+      setDeliveryStatus('IDLE');
+    }
+  };
+
+  // Save/Share received photo to local device
+  const handleSaveToDevice = async (photoUrl: string) => {
+    try {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(photoUrl);
+      } else {
+        Alert.alert('Sharing unavailable', 'Saving is not supported on this device.');
+      }
+    } catch {
+      Alert.alert('Save Failed', 'Unable to save or share photo.');
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Header */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <ArrowLeft size={22} color={theme.colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.barTitle}>Photo Moment</Text>
-        <View style={{ width: 38 }} />
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>Our Photos</Text>
+          <Text style={styles.subtitle}>
+            With {partner?.nickname || 'Partner'} • {partnerOnline ? 'Online now' : 'Offline'}
+          </Text>
+        </View>
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Daily Challenge Card */}
-        <Card highlight style={styles.challengeCard}>
-          <View style={styles.tagRow}>
-            <Badge label="Daily Photo Challenge" variant="gold" />
-            <Sparkles size={16} color={theme.colors.secondary} />
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* ACTION BUTTONS: CAMERA OR GALLERY */}
+        <View style={styles.captureRow}>
+          <TouchableOpacity
+            style={styles.captureBtn}
+            activeOpacity={0.88}
+            onPress={handleLaunchCamera}
+          >
+            <Camera size={24} color="#FFF8F5" />
+            <Text style={styles.captureBtnText}>Take Photo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.captureBtn, { backgroundColor: 'rgba(217, 183, 126, 0.2)', borderWidth: 1, borderColor: 'rgba(217, 183, 126, 0.4)' }]}
+            activeOpacity={0.88}
+            onPress={handlePickFromGallery}
+          >
+            <ImageIcon size={24} color={theme.colors.gold} />
+            <Text style={[styles.captureBtnText, { color: theme.colors.gold }]}>Photo Library</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* PHOTO PREVIEW & SEND CARD (When photo is selected) */}
+        {selectedImageUri && (
+          <View style={styles.previewCard}>
+            <View style={styles.previewImageWrapper}>
+              <Image source={{ uri: selectedImageUri }} style={styles.previewImage} resizeMode="cover" />
+              <TouchableOpacity
+                style={styles.cancelPreviewBtn}
+                onPress={() => {
+                  setSelectedImageUri(null);
+                  setSelectedBase64(null);
+                }}
+              >
+                <X size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.captionRow}>
+              <Input
+                value={caption}
+                onChangeText={setCaption}
+                placeholder="Write a sweet caption..."
+                style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.06)' }}
+              />
+              <TouchableOpacity
+                style={styles.sendPhotoBtn}
+                onPress={handleSendPhoto}
+                disabled={sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Send size={20} color="#FFF" />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
+        )}
 
-          <Text style={styles.promptText}>"{challengePrompt}"</Text>
+        {/* PHOTO GALLERY SECTION */}
+        <View style={styles.sectionTitleRow}>
+          <Text style={styles.sectionTitle}>Shared Moments</Text>
+          <Text style={styles.photoCountText}>{photos.length} photos</Text>
+        </View>
 
-          <View style={styles.actionRow}>
-            <Button
-              title="Camera"
-              onPress={handleCapture}
-              loading={uploading}
-              icon={<Camera size={18} color="#0D0B10" />}
-              variant="primary"
-              size="md"
-              style={styles.flexBtn}
-            />
-            <Button
-              title="Gallery"
-              onPress={handlePickGallery}
-              loading={uploading}
-              icon={<ImageIcon size={18} color={theme.colors.secondary} />}
-              variant="secondary"
-              size="md"
-              style={styles.flexBtn}
-            />
-          </View>
-        </Card>
-
-        {/* Stream of Shared Photos */}
-        <Text style={styles.streamTitle}>Today's Snaps</Text>
-
-        {photos.length === 0 ? (
+        {loading ? (
+          <ActivityIndicator color={theme.colors.primary} style={{ marginTop: 30 }} />
+        ) : photos.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Camera size={40} color={theme.colors.textMuted} />
-            <Text style={styles.emptyText}>No photos shared today yet.</Text>
+            <ImageIcon size={32} color={theme.colors.textMuted} />
+            <Text style={styles.emptyTitle}>No photos shared yet</Text>
             <Text style={styles.emptySub}>
-              Snap a quick moment of your surroundings for {partner?.firstName || 'your partner'}.
+              Tap "Take Photo" to share an intimate glimpse of your day!
             </Text>
           </View>
         ) : (
-          photos.map((item) => (
-            <Card key={item.id} style={styles.photoCard}>
-              <View style={styles.cardAuthor}>
-                <Avatar url={item.user?.avatarUrl} name={item.user?.firstName} size={32} />
-                <Text style={styles.authorName}>{item.user?.firstName || 'Partner'}</Text>
-                <Text style={styles.timestamp}>
-                  {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </View>
-
-              <Image source={{ uri: item.photoUrl }} style={styles.photoImage} resizeMode="cover" />
-
-              {Boolean(item.caption) && (
-                <Text style={styles.captionText}>{item.caption}</Text>
-              )}
-            </Card>
-          ))
+          <View style={styles.photoGrid}>
+            {photos.map((item, index) => (
+              <TouchableOpacity
+                key={item.id || index}
+                style={styles.photoCard}
+                activeOpacity={0.88}
+                onPress={() => setFullViewPhoto(item)}
+              >
+                <Image source={{ uri: item.photoUrl }} style={styles.photoThumb} resizeMode="cover" />
+                <View style={styles.photoOverlay}>
+                  <View style={styles.statusPill}>
+                    {item.deliveryStatus === 'SEEN' ? (
+                      <CheckCheck size={14} color={theme.colors.primary} />
+                    ) : item.deliveryStatus === 'DELIVERED' ? (
+                      <CheckCheck size={14} color="#FFF" />
+                    ) : (
+                      <Clock size={14} color={theme.colors.textMuted} />
+                    )}
+                    <Text style={styles.statusText}>{item.deliveryStatus || 'Sent'}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
       </ScrollView>
+
+      {/* FULL VIEW MODAL */}
+      <Modal visible={Boolean(fullViewPhoto)} transparent animationType="fade">
+        <View style={styles.fullViewBackdrop}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.fullViewHeader}>
+              <TouchableOpacity onPress={() => setFullViewPhoto(null)} style={styles.modalCloseBtn}>
+                <X size={24} color="#FFF" />
+              </TouchableOpacity>
+              {fullViewPhoto?.photoUrl && (
+                <TouchableOpacity
+                  style={styles.downloadBtn}
+                  onPress={() => handleSaveToDevice(fullViewPhoto.photoUrl)}
+                >
+                  <Download size={20} color="#FFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.fullViewBody}>
+              {fullViewPhoto?.photoUrl && (
+                <Image
+                  source={{ uri: fullViewPhoto.photoUrl }}
+                  style={styles.fullImage}
+                  resizeMode="contain"
+                />
+              )}
+              {fullViewPhoto?.caption ? (
+                <Text style={styles.fullCaption}>{fullViewPhoto.caption}</Text>
+              ) : null}
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -196,98 +367,202 @@ const styles = StyleSheet.create({
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   backBtn: {
     padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
-  barTitle: {
-    fontSize: theme.typography.sizes.lg,
+  titleContainer: {
+    alignItems: 'center',
+  },
+  title: {
+    fontFamily: theme.fonts.heading,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
-  content: {
+  subtitle: {
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  scrollContent: {
     paddingHorizontal: 20,
+    paddingTop: 18,
     paddingBottom: 40,
   },
-  challengeCard: {
-    padding: 22,
-    marginBottom: 24,
-  },
-  tagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  promptText: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: theme.colors.textPrimary,
-    lineHeight: 28,
-    marginBottom: 20,
-  },
-  actionRow: {
+  captureRow: {
     flexDirection: 'row',
     gap: 12,
+    marginBottom: 20,
   },
-  flexBtn: {
+  captureBtn: {
     flex: 1,
-  },
-  streamTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: 14,
-  },
-  emptyBox: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 40,
+    justifyContent: 'center',
     gap: 8,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 14,
+    borderRadius: 18,
   },
-  emptyText: {
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-    fontSize: theme.typography.sizes.base,
+  captureBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF8F5',
   },
-  emptySub: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.typography.sizes.xs,
-    textAlign: 'center',
-  },
-  photoCard: {
+  previewCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 22,
     padding: 14,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(232, 160, 168, 0.3)',
+    marginBottom: 24,
   },
-  cardAuthor: {
+  previewImageWrapper: {
+    width: '100%',
+    height: 240,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 12,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cancelPreviewBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 6,
+    borderRadius: 16,
+  },
+  captionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
   },
-  authorName: {
-    fontSize: theme.typography.sizes.sm,
+  sendPhotoBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.textPrimary,
-    flex: 1,
   },
-  timestamp: {
-    fontSize: 11,
+  photoCountText: {
+    fontSize: 12,
     color: theme.colors.textMuted,
   },
-  photoImage: {
-    width: '100%',
-    height: 300,
-    borderRadius: theme.radii.lg,
-    backgroundColor: '#17131C',
+  emptyBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  captionText: {
-    marginTop: 10,
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: theme.colors.textPrimary,
-    fontSize: theme.typography.sizes.sm,
+    marginTop: 10,
+  },
+  emptySub: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: 4,
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  photoCard: {
+    width: '48%',
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  photoThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    right: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  fullViewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.94)',
+  },
+  fullViewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  modalCloseBtn: {
+    padding: 8,
+  },
+  downloadBtn: {
+    padding: 8,
+  },
+  fullViewBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  fullImage: {
+    width: '100%',
+    height: '80%',
+    borderRadius: 18,
+  },
+  fullCaption: {
+    color: '#FFF',
+    fontSize: 15,
+    marginTop: 14,
+    textAlign: 'center',
   },
 });
-

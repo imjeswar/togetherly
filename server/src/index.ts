@@ -24,6 +24,10 @@ import notificationsRoutes from './routes/notifications.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import achievementsRoutes from './routes/achievements.routes.js';
 import securityRoutes from './routes/security.routes.js';
+import spaceRoutes from './routes/space.routes.js';
+import drawingRoutes from './routes/drawing.routes.js';
+import photoRoutes from './routes/photo.routes.js';
+import deliveryRoutes from './routes/delivery.routes.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -81,7 +85,13 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// API Routes
+// Redesigned Two-Person Anonymous Space, Drawing, Photo & Offline Delivery
+app.use('/api/space', spaceRoutes);
+app.use('/api/drawing', drawingRoutes);
+app.use('/api/photo', photoRoutes);
+app.use('/api/delivery', deliveryRoutes);
+
+// Legacy routes (safe backwards compatibility)
 app.use('/api/auth', authRoutes);
 app.use('/api/pairing', pairingRoutes);
 app.use('/api/dashboard', dashboardRoutes);

@@ -1,4 +1,4 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
 
@@ -17,9 +17,12 @@ export function setupSocketIO(server: HTTPServer) {
 
   ioInstance = io;
 
-  io.on('connection', (socket) => {
-    // Authenticate socket handshake if token is provided
-    let authenticatedUserId: string | null = null;
+  io.on('connection', (socket: Socket) => {
+    let currentDeviceId: string | null = null;
+    let currentSpaceId: string | null = null;
+    let legacyUserId: string | null = null;
+
+    // Authenticate handshake if token provided
     const authHeader = socket.handshake.headers['authorization'];
     const rawToken =
       socket.handshake.auth?.token ||
@@ -27,83 +30,120 @@ export function setupSocketIO(server: HTTPServer) {
 
     if (rawToken) {
       try {
-        const decoded = jwt.verify(rawToken, JWT_SECRET) as { userId: string };
-        authenticatedUserId = decoded.userId;
-        socket.join(`user_${authenticatedUserId}`);
-        socket.emit('auth_success', { userId: authenticatedUserId });
+        const decoded = jwt.verify(rawToken, JWT_SECRET) as any;
+        if (decoded.deviceId && decoded.spaceId) {
+          currentDeviceId = decoded.deviceId;
+          currentSpaceId = decoded.spaceId;
+          socket.join(`space_${currentSpaceId}`);
+          socket.join(`device_${currentDeviceId}`);
+          socket.to(`space_${currentSpaceId}`).emit('partner_online', { deviceId: currentDeviceId });
+          socket.emit('auth_success', { deviceId: currentDeviceId, spaceId: currentSpaceId });
+        } else if (decoded.userId) {
+          legacyUserId = decoded.userId;
+          socket.join(`user_${legacyUserId}`);
+        }
       } catch (err) {
-        // Continue connection even if unauthenticated, join will occur explicitly
+        // Continue connection
       }
     }
 
-    // Join private couple room (support both 'join_relationship' and 'couple:join')
-    const handleJoin = ({ relationshipId, userId }: { relationshipId?: string; userId?: string }) => {
-      const resolvedUserId = userId || authenticatedUserId;
+    // 1. ANONYMOUS DEVICE SPACE JOIN
+    socket.on('join_space', ({ spaceId, deviceId }: { spaceId?: string; deviceId?: string }) => {
+      const resolvedSpaceId = spaceId || currentSpaceId;
+      const resolvedDeviceId = deviceId || currentDeviceId;
+
+      if (resolvedSpaceId) {
+        currentSpaceId = resolvedSpaceId;
+        socket.join(`space_${resolvedSpaceId}`);
+        socket.to(`space_${resolvedSpaceId}`).emit('partner_online', { deviceId: resolvedDeviceId });
+      }
+
+      if (resolvedDeviceId) {
+        currentDeviceId = resolvedDeviceId;
+        socket.join(`device_${resolvedDeviceId}`);
+      }
+    });
+
+    // 2. REAL-TIME SHARED CANVAS STROKE SYNCHRONIZATION
+    socket.on('shared_canvas_stroke', ({ spaceId, stroke, deviceId }: any) => {
+      const targetSpace = spaceId || currentSpaceId;
+      if (targetSpace) {
+        socket.to(`space_${targetSpace}`).emit('shared_canvas_stroke', {
+          stroke,
+          deviceId: deviceId || currentDeviceId,
+        });
+      }
+    });
+
+    socket.on('shared_canvas_clear', ({ spaceId, deviceId }: any) => {
+      const targetSpace = spaceId || currentSpaceId;
+      if (targetSpace) {
+        socket.to(`space_${targetSpace}`).emit('shared_canvas_clear', {
+          deviceId: deviceId || currentDeviceId,
+        });
+      }
+    });
+
+    // 3. DRAWING & PHOTO NOTIFICATIONS
+    socket.on('drawing_sent', ({ spaceId, drawing }: any) => {
+      const targetSpace = spaceId || currentSpaceId;
+      if (targetSpace) {
+        socket.to(`space_${targetSpace}`).emit('incoming_drawing', drawing);
+      }
+    });
+
+    socket.on('photo_sent', ({ spaceId, photo }: any) => {
+      const targetSpace = spaceId || currentSpaceId;
+      if (targetSpace) {
+        socket.to(`space_${targetSpace}`).emit('incoming_photo', photo);
+      }
+    });
+
+    // 4. DELIVERY STATUS & SEEN CONFIRMATION
+    socket.on('delivery_ack', ({ eventId, senderDeviceId }: any) => {
+      if (senderDeviceId) {
+        socket.to(`device_${senderDeviceId}`).emit('delivery_status_update', {
+          eventId,
+          status: 'DELIVERED',
+          deliveredAt: new Date(),
+        });
+      }
+    });
+
+    socket.on('delivery_seen', ({ eventId, senderDeviceId }: any) => {
+      if (senderDeviceId) {
+        socket.to(`device_${senderDeviceId}`).emit('delivery_status_update', {
+          eventId,
+          status: 'SEEN',
+          seenAt: new Date(),
+        });
+      }
+    });
+
+    // --- LEGACY CHANNELS (Safe compatibility during transition) ---
+    const handleLegacyJoin = ({ relationshipId, userId }: { relationshipId?: string; userId?: string }) => {
       if (relationshipId) {
         socket.join(`rel_${relationshipId}`);
-        socket.to(`rel_${relationshipId}`).emit('partner_online', { userId: resolvedUserId });
+        socket.to(`rel_${relationshipId}`).emit('partner_online', { userId });
       }
-      if (resolvedUserId) {
-        socket.join(`user_${resolvedUserId}`);
+      if (userId) {
+        socket.join(`user_${userId}`);
       }
     };
-
-    socket.on('join_relationship', handleJoin);
-    socket.on('couple:join', handleJoin);
-
-    // Chat Message
-    socket.on('send_chat_message', ({ relationshipId, message }) => {
-      socket.to(`rel_${relationshipId}`).emit('receive_chat_message', message);
-    });
-
-    // Typing indicator
-    socket.on('typing', ({ relationshipId, isTyping, userName }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_typing', { isTyping, userName });
-    });
-
-    // Canvas real-time stroke synchronization
-    socket.on('canvas_stroke', ({ relationshipId, stroke }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_canvas_stroke', stroke);
-    });
-
-    // Canvas clear
-    socket.on('canvas_clear', ({ relationshipId }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_canvas_clear');
-    });
-
-    // Canvas sticky note
-    socket.on('canvas_sticky_note', ({ relationshipId, note }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_canvas_sticky_note', note);
-    });
-
-    // Game action
-    socket.on('game_action', ({ relationshipId, sessionId, action, data }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_game_action', { sessionId, action, data });
-    });
-
-    // Activity updates (e.g. Question answered, Photo uploaded)
-    socket.on('activity_completed', ({ relationshipId, type, userName }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_activity_completed', { type, userName });
-    });
-
-    // Partner paired alert
-    socket.on('partner_joined_space', ({ relationshipId, partner }) => {
-      socket.to(`rel_${relationshipId}`).emit('partner_paired', { partner });
-      socket.to(`rel_${relationshipId}`).emit('partner:joined', { partner });
-    });
+    socket.on('join_relationship', handleLegacyJoin);
+    socket.on('couple:join', handleLegacyJoin);
 
     socket.on('disconnect', () => {
-      if (authenticatedUserId) {
-        io.emit('partner_offline', { userId: authenticatedUserId });
+      if (currentSpaceId && currentDeviceId) {
+        socket.to(`space_${currentSpaceId}`).emit('partner_offline', { deviceId: currentDeviceId });
+      }
+      if (legacyUserId) {
+        io.emit('partner_offline', { userId: legacyUserId });
       }
     });
   });
-
-  return io;
 }
 
 export function getIO(): SocketIOServer | null {
   return ioInstance;
 }
-
-

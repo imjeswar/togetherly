@@ -89,6 +89,19 @@ export const secureStorage = {
   getDeviceSessionId: async () => getItem(ENV.STORAGE_KEYS.DEVICE_SESSION_ID),
   setDeviceSessionId: async (id: string) => setItem(ENV.STORAGE_KEYS.DEVICE_SESSION_ID, id),
 
+  // Device & Space Storage (Anonymous Credentials)
+  getOrCreateDeviceId: async (): Promise<string> => {
+    let id = await getItem('togetherly_device_id');
+    if (!id) {
+      id = 'dev_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
+      await setItem('togetherly_device_id', id);
+    }
+    return id;
+  },
+  getSpaceId: async () => getItem('togetherly_space_id'),
+  setSpaceId: async (id: string) => setItem('togetherly_space_id', id),
+  clearSpaceId: async () => deleteItem('togetherly_space_id'),
+
   // Custom Server Endpoint
   getCustomApiUrl: async () => getItem(ENV.STORAGE_KEYS.CUSTOM_API_URL),
   setCustomApiUrl: async (url: string) => setItem(ENV.STORAGE_KEYS.CUSTOM_API_URL, url),
@@ -96,6 +109,7 @@ export const secureStorage = {
 
   // Reset Everything
   clearAll: async () => {
+    await deleteItem('togetherly_space_id');
     await deleteItem(ENV.STORAGE_KEYS.AUTH_TOKEN);
     await deleteItem(ENV.STORAGE_KEYS.BIOMETRIC_ENABLED);
     await deleteItem(ENV.STORAGE_KEYS.BIOMETRIC_PIN);

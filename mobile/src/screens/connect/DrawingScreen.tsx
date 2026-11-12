@@ -1,218 +1,209 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
-  Modal,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ArrowLeft, Plus, Palette, Send, Eye } from 'lucide-react-native';
-import Svg, { Path } from 'react-native-svg';
+import {
+  ArrowLeft,
+  Sparkles,
+  Save,
+  Trash2,
+  Users,
+  Wifi,
+  WifiOff,
+} from 'lucide-react-native';
 import { Canvas, Stroke } from '../../components/drawing/Canvas';
-import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
 import { api } from '../../services/api';
+import { socketService } from '../../services/socket';
 import { offlineStorage } from '../../services/offlineStorage';
-import { useCouple } from '../../context/CoupleContext';
+import { useAuth } from '../../context/AuthContext';
 import { theme } from '../../config/theme';
 
 export const DrawingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { partner } = useCouple();
+  const { spaceId, deviceId, partner, partnerOnline } = useAuth();
 
-  const [drawings, setDrawings] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [title, setTitle] = useState('');
-  const [currentStrokes, setCurrentStrokes] = useState<Stroke[]>([]);
-  const [selectedDrawing, setSelectedDrawing] = useState<any | null>(null);
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [partnerDrawing, setPartnerDrawing] = useState<boolean>(false);
+  const [saving, setSaving] = useState<boolean>(false);
 
+  const strokesRef = useRef<Stroke[]>([]);
+  strokesRef.current = strokes;
+
+  // Load existing shared canvas state
   useEffect(() => {
-    loadDrawings();
-  }, []);
+    loadCanvasState();
 
-  const loadDrawings = async () => {
-    setLoading(true);
+    // Listen to partner strokes
+    const unsubStroke = socketService.on('shared_canvas_stroke', (data: any) => {
+      if (data?.stroke && data.deviceId !== deviceId) {
+        setStrokes((prev) => [...prev, data.stroke]);
+        setPartnerDrawing(true);
+        setTimeout(() => setPartnerDrawing(false), 2000);
+      }
+    });
+
+    // Listen to canvas clear
+    const unsubClear = socketService.on('shared_canvas_clear', (data: any) => {
+      if (data?.deviceId !== deviceId) {
+        setStrokes([]);
+      }
+    });
+
+    return () => {
+      unsubStroke?.();
+      unsubClear?.();
+    };
+  }, [spaceId, deviceId]);
+
+  const loadCanvasState = async () => {
     try {
-      const res = await api.getDrawings();
-      if (Array.isArray(res)) {
-        setDrawings(res);
+      setLoading(true);
+      const res = await api.getSharedCanvasState();
+      if (res?.sharedCanvas?.canvasData) {
+        try {
+          const parsed = JSON.parse(res.sharedCanvas.canvasData);
+          if (Array.isArray(parsed)) {
+            setStrokes(parsed);
+          }
+        } catch {}
       }
     } catch {
+      // Fallback to local cache
       const cached = await offlineStorage.getCachedDrawings();
-      setDrawings(cached);
+      if (cached.length > 0 && cached[0].canvasData) {
+        try {
+          const parsed = JSON.parse(cached[0].canvasData);
+          if (Array.isArray(parsed)) setStrokes(parsed);
+        } catch {}
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveDrawing = async () => {
-    if (currentStrokes.length === 0) {
-      Alert.alert('Empty Canvas', 'Please draw something before saving!');
+  // When user finishes a stroke on their device
+  const handleStrokesChange = (newStrokes: Stroke[]) => {
+    if (newStrokes.length > strokesRef.current.length) {
+      // Latest stroke added
+      const lastStroke = newStrokes[newStrokes.length - 1];
+      socketService.emit('shared_canvas_stroke', {
+        spaceId,
+        deviceId,
+        stroke: lastStroke,
+      });
+    }
+    setStrokes(newStrokes);
+  };
+
+  const handleSaveSnapshot = async () => {
+    if (strokes.length === 0) {
+      Alert.alert('Empty Canvas', 'Draw something with your partner first!');
       return;
     }
-    const canvasData = JSON.stringify(currentStrokes);
-    const drawingTitle = title.trim() || 'Shared Artwork';
 
-    setLoading(true);
+    setSaving(true);
+    const canvasData = JSON.stringify(strokes);
+
     try {
-      await api.saveDrawing({
-        title: drawingTitle,
+      await api.saveSharedCanvasState({
         canvasData,
+        title: 'Our Living Canvas',
       });
-      await offlineStorage.saveDrawingDraft(`draw_${Date.now()}`, drawingTitle, canvasData);
-      setIsCreating(false);
-      setTitle('');
-      setCurrentStrokes([]);
-      await loadDrawings();
+
+      await offlineStorage.saveDrawingDraft(`shared_${Date.now()}`, 'Shared Canvas', canvasData);
+
+      Alert.alert('Saved to Sanctuary 💖', 'Your collaborative artwork was saved.');
     } catch {
-      await offlineStorage.saveDrawingDraft(`draw_${Date.now()}`, drawingTitle, canvasData);
-      Alert.alert('Saved to Offline Sanctuary', 'Your artwork is saved locally and will sync when you reconnect.');
-      setIsCreating(false);
+      Alert.alert('Saved Locally', 'Saved to your device storage.');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
+  };
+
+  const handleClear = () => {
+    Alert.alert(
+      'Clear Shared Canvas',
+      'Are you sure you want to clear the canvas for both of you?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            setStrokes([]);
+            socketService.emit('shared_canvas_clear', { spaceId, deviceId });
+          },
+        },
+      ]
+    );
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Header */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <ArrowLeft size={22} color={theme.colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.barTitle}>Shared Canvas</Text>
-        <TouchableOpacity onPress={() => setIsCreating(true)} style={styles.addBtn}>
-          <Plus size={22} color={theme.colors.primary} />
-        </TouchableOpacity>
+
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>Shared Canvas</Text>
+          <View style={styles.presencePill}>
+            <View
+              style={[
+                styles.dot,
+                { backgroundColor: partnerOnline ? theme.colors.success : theme.colors.textMuted },
+              ]}
+            />
+            <Text style={styles.presenceText}>
+              {partnerDrawing
+                ? `${partner?.nickname || 'Partner'} is drawing...`
+                : partnerOnline
+                ? `${partner?.nickname || 'Partner'} is co-drawing`
+                : `${partner?.nickname || 'Partner'} offline`}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.topActions}>
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={handleSaveSnapshot}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            ) : (
+              <Save size={20} color={theme.colors.primary} />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.banner}>
-          <Text style={styles.bannerTitle}>Intimate Art Gallery</Text>
-          <Text style={styles.bannerSub}>
-            Express love through collaborative sketches and sweet doodles.
-          </Text>
+      {/* Main Collaborative Canvas Area */}
+      {loading ? (
+        <View style={styles.centerLoading}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Syncing canvas with partner...</Text>
         </View>
-
-        {drawings.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Palette size={44} color={theme.colors.secondary} style={{ opacity: 0.6 }} />
-            <Text style={styles.emptyTitle}>No drawings yet</Text>
-            <Text style={styles.emptySub}>
-              Start a new sketch or send a quick doodle to {partner?.firstName || 'your partner'}.
-            </Text>
-            <Button
-              title="Create First Sketch"
-              onPress={() => setIsCreating(true)}
-              variant="primary"
-              size="md"
-              style={{ marginTop: 16 }}
-            />
-          </View>
-        ) : (
-          drawings.map((draw) => {
-            let strokes: Stroke[] = [];
-            try {
-              strokes = JSON.parse(draw.canvasData);
-            } catch {}
-
-            return (
-              <TouchableOpacity
-                key={draw.id}
-                onPress={() => setSelectedDrawing(draw)}
-                activeOpacity={0.8}
-              >
-                <Card style={styles.drawingCard}>
-                  <Text style={styles.drawingTitle}>{draw.title}</Text>
-                  <View style={styles.previewBox}>
-                    <Svg width="100%" height={160} viewBox="0 0 350 350">
-                      {strokes.map((s, idx) => (
-                        <Path
-                          key={idx}
-                          d={s.path}
-                          stroke={s.color}
-                          strokeWidth={s.width}
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                      ))}
-                    </Svg>
-                  </View>
-                  <Text style={styles.dateText}>
-                    {new Date(draw.createdAt || Date.now()).toLocaleDateString()}
-                  </Text>
-                </Card>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </ScrollView>
-
-      {/* Create Drawing Modal */}
-      <Modal visible={isCreating} animationType="slide">
-        <SafeAreaView style={styles.createModalArea}>
-          <View style={styles.createTopBar}>
-            <TouchableOpacity onPress={() => setIsCreating(false)}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalHeading}>New Drawing</Text>
-            <TouchableOpacity onPress={handleSaveDrawing} disabled={loading}>
-              <Text style={styles.saveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.createForm}>
-            <Input
-              placeholder="Title (optional)"
-              value={title}
-              onChangeText={setTitle}
-            />
-            <Canvas height={360} onStrokesChange={setCurrentStrokes} />
-          </View>
-        </SafeAreaView>
-      </Modal>
-
-      {/* View Full Drawing Modal */}
-      <Modal visible={Boolean(selectedDrawing)} animationType="fade" transparent>
-        <View style={styles.viewOverlay}>
-          <View style={styles.viewCard}>
-            <View style={styles.viewHeader}>
-              <Text style={styles.viewTitle}>{selectedDrawing?.title}</Text>
-              <TouchableOpacity onPress={() => setSelectedDrawing(null)}>
-                <Text style={styles.cancelText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.fullCanvasBox}>
-              <Svg width="100%" height={320} viewBox="0 0 360 360">
-                {selectedDrawing?.canvasData ? (
-                  (() => {
-                    try {
-                      const parsed: Stroke[] = JSON.parse(selectedDrawing.canvasData);
-                      return parsed.map((s, idx) => (
-                        <Path
-                          key={idx}
-                          d={s.path}
-                          stroke={s.color}
-                          strokeWidth={s.width}
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                      ));
-                    } catch {
-                      return null;
-                    }
-                  })()
-                ) : null}
-              </Svg>
-            </View>
-          </View>
+      ) : (
+        <View style={styles.canvasWrapper}>
+          <Canvas
+            initialStrokes={strokes}
+            onStrokesChange={handleStrokesChange}
+            height={500}
+          />
         </View>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -224,141 +215,64 @@ const styles = StyleSheet.create({
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   backBtn: {
     padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
-  barTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  addBtn: {
-    padding: 8,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  banner: {
-    marginBottom: 20,
-  },
-  bannerTitle: {
-    fontSize: theme.typography.sizes.xl,
-    fontWeight: '800',
-    color: theme.colors.secondary,
-  },
-  bannerSub: {
-    fontSize: theme.typography.sizes.xs,
-    color: theme.colors.textSecondary,
-    marginTop: 4,
-  },
-  emptyContainer: {
+  titleContainer: {
     alignItems: 'center',
-    paddingVertical: 60,
   },
-  emptyTitle: {
-    fontSize: theme.typography.sizes.lg,
+  title: {
+    fontFamily: theme.fonts.heading,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.textPrimary,
-    marginTop: 12,
   },
-  emptySub: {
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 20,
-    paddingHorizontal: 30,
-  },
-  drawingCard: {
-    padding: 16,
-    marginBottom: 16,
-  },
-  drawingTitle: {
-    fontSize: theme.typography.sizes.base,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: 10,
-  },
-  previewBox: {
-    backgroundColor: '#14101A',
-    borderRadius: theme.radii.lg,
-    overflow: 'hidden',
-    height: 160,
+  presencePill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    marginTop: 2,
   },
-  dateText: {
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  presenceText: {
     fontSize: 11,
     color: theme.colors.textMuted,
-    marginTop: 10,
-    textAlign: 'right',
   },
-  createModalArea: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  createTopBar: {
+  topActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 8,
+  },
+  actionBtn: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  centerLoading: {
+    flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.cardBorder,
-  },
-  modalHeading: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  cancelText: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.typography.sizes.base,
-  },
-  saveText: {
-    color: theme.colors.primary,
-    fontSize: theme.typography.sizes.base,
-    fontWeight: '700',
-  },
-  createForm: {
-    padding: 16,
-    flex: 1,
-  },
-  viewOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
-    padding: 20,
+    gap: 12,
   },
-  viewCard: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radii['2xl'],
-    padding: 20,
-    borderWidth: 1,
-    borderColor: theme.colors.cardBorder,
+  loadingText: {
+    color: theme.colors.textMuted,
+    fontSize: 13,
   },
-  viewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  viewTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  fullCanvasBox: {
-    backgroundColor: '#14101A',
-    borderRadius: theme.radii.lg,
-    height: 320,
-    overflow: 'hidden',
+  canvasWrapper: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'center',
   },
 });
-

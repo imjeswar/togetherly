@@ -9,6 +9,7 @@ export const theme = {
     primaryMuted: 'rgba(232, 160, 168, 0.15)',
     secondary: '#D9B77E', // Warm gold
     secondaryMuted: 'rgba(217, 183, 126, 0.15)',
+    gold: '#D9B77E',
     textPrimary: '#FFF8F5',
     textSecondary: '#B9AEB9',
     textMuted: '#7A727D',
@@ -38,6 +39,10 @@ export const theme = {
       '3xl': 30,
       '4xl': 36,
     },
+  },
+  fonts: {
+    heading: 'System',
+    body: 'System',
   },
   spacing: {
     xs: 4,

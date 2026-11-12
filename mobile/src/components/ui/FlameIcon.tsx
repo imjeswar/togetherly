@@ -5,9 +5,10 @@ import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 interface FlameIconProps {
   size?: number;
   isLit?: boolean;
+  color?: string;
 }
 
-export const FlameIcon: React.FC<FlameIconProps> = ({ size = 28, isLit = true }) => {
+export const FlameIcon: React.FC<FlameIconProps> = ({ size = 28, isLit = true, color }) => {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {

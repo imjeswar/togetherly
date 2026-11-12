@@ -33,6 +33,42 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  // Redesigned Anonymous Space & Two-Person Delivery
+  space: {
+    create: (body: { deviceId: string; nickname?: string; platform?: string }) =>
+      request<any>('/space/create', { method: 'POST', body: JSON.stringify(body) }),
+    join: (body: { code: string; deviceId: string; nickname?: string; platform?: string }) =>
+      request<any>('/space/join', { method: 'POST', body: JSON.stringify(body) }),
+    getStatus: () => request<any>('/space/status'),
+    updateProfile: (body: { nickname?: string; avatarUrl?: string }) =>
+      request<any>('/space/profile', { method: 'PUT', body: JSON.stringify(body) }),
+    unpair: () => request<any>('/space/unpair', { method: 'POST' }),
+  },
+
+  drawing: {
+    sendQuickDraw: (body: { eventId?: string; canvasData: any; previewData?: string; title?: string }) =>
+      request<any>('/drawing/send', { method: 'POST', body: JSON.stringify(body) }),
+    getGallery: () => request<any>('/drawing/gallery'),
+    getSharedState: () => request<any>('/drawing/shared/state'),
+    saveSharedState: (body: { canvasData: any; previewData?: string; title?: string }) =>
+      request<any>('/drawing/shared/save', { method: 'POST', body: JSON.stringify(body) }),
+  },
+
+  photo: {
+    send: (body: { photoData: string; caption?: string; eventId?: string }) =>
+      request<any>('/photo/send', { method: 'POST', body: JSON.stringify(body) }),
+    getGallery: () => request<any>('/photo/gallery'),
+    markSeen: (photoId: string) => request<any>(`/photo/${photoId}/seen`, { method: 'POST' }),
+  },
+
+  delivery: {
+    getPending: () => request<any>('/delivery/pending'),
+    ack: (eventIds: string[]) =>
+      request<any>('/delivery/ack', { method: 'POST', body: JSON.stringify({ eventIds }) }),
+    seen: (eventIds: string[]) =>
+      request<any>('/delivery/seen', { method: 'POST', body: JSON.stringify({ eventIds }) }),
+  },
+
   auth: {
     register: (body: any) => request<any>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
     login: (body: any) => request<any>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),

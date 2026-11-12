@@ -6,50 +6,66 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ArrowLeft, Send, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, Send, Sparkles, CheckCheck, Clock } from 'lucide-react-native';
 import { Canvas, Stroke } from '../../components/drawing/Canvas';
 import { Button } from '../../components/ui/Button';
 import { api } from '../../services/api';
 import { offlineStorage } from '../../services/offlineStorage';
-import { useCouple } from '../../context/CoupleContext';
+import { useAuth } from '../../context/AuthContext';
 import { theme } from '../../config/theme';
 
 export const QuickDrawingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { partner } = useCouple();
+  const { partner, partnerOnline } = useAuth();
 
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [sending, setSending] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<'IDLE' | 'SENDING' | 'SENT' | 'DELIVERED'>('IDLE');
 
   const handleSendDrawing = async () => {
     if (strokes.length === 0) {
-      Alert.alert('Empty Canvas', 'Draw a quick doodle, heart, or note for your partner first!');
+      Alert.alert('Empty Canvas', 'Draw a quick doodle, heart, or message for your partner first!');
       return;
     }
 
     setSending(true);
+    setDeliveryStatus('SENDING');
     const canvasData = JSON.stringify(strokes);
-    const id = `draw_${Date.now()}`;
+    const eventId = `draw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     try {
-      // Save locally to SQLite immediately
-      await offlineStorage.saveDrawingDraft(id, 'Quick Sketch', canvasData);
+      // 1. Save locally to SQLite immediately so user never loses it
+      await offlineStorage.saveDrawingDraft(eventId, 'Quick Sketch', canvasData);
 
-      // Send via API or queue if offline
-      await api.saveDrawing({
-        title: 'Quick Heart Sketch',
+      // 2. Transmit to backend
+      const res = await api.sendQuickDraw({
+        eventId,
         canvasData,
+        title: 'Quick Doodle',
       });
 
-      Alert.alert('Sent!', `Your drawing was sent to ${partner?.firstName || 'your partner'}!`, [
-        { text: 'Done', onPress: () => navigation.goBack() },
-      ]);
+      if (res?.deliveryStatus === 'DELIVERED') {
+        setDeliveryStatus('DELIVERED');
+        Alert.alert('Delivered! ✨', `Your drawing was delivered instantly to ${partner?.nickname || 'your partner'}!`, [
+          { text: 'Done', onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        setDeliveryStatus('SENT');
+        Alert.alert(
+          'Sent! 💌',
+          `${partner?.nickname || 'Your partner'} is currently offline. Your drawing is queued and will appear the moment they open the app.`,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
     } catch {
-      Alert.alert('Saved Offline', 'Your drawing is saved safely on your device and will sync as soon as you reconnect.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert(
+        'Saved Locally',
+        'Your drawing is saved safely on your device and will be sent automatically when your internet reconnects.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
     } finally {
       setSending(false);
     }
@@ -58,33 +74,38 @@ export const QuickDrawingScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <ArrowLeft size={22} color={theme.colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.titleContainer}>
-          <Sparkles size={16} color={theme.colors.secondary} />
-          <Text style={styles.barTitle}>Quick Drawing</Text>
+          <Text style={styles.title}>Quick Draw</Text>
+          <Text style={styles.subtitle}>
+            To {partner?.nickname || 'Partner'} • {partnerOnline ? 'Online now' : 'Offline'}
+          </Text>
         </View>
-        <View style={{ width: 38 }} />
+        <View style={{ width: 40 }} />
       </View>
 
-      <View style={styles.content}>
-        <Text style={styles.hintText}>
-          Doodle something sweet for {partner?.firstName || 'your partner'}. It synchronizes instantly!
-        </Text>
+      <View style={styles.canvasContainer}>
+        <Canvas height={420} onStrokesChange={setStrokes} />
+      </View>
 
-        <Canvas height={380} onStrokesChange={setStrokes} />
-
-        <Button
-          title={`Send to ${partner?.firstName || 'Partner'}`}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={[styles.sendButton, strokes.length === 0 && styles.sendDisabled]}
           onPress={handleSendDrawing}
-          loading={sending}
-          disabled={strokes.length === 0}
-          icon={<Send size={18} color="#0D0B10" />}
-          variant="primary"
-          size="lg"
-          style={styles.sendBtn}
-        />
+          disabled={sending || strokes.length === 0}
+          activeOpacity={0.88}
+        >
+          {sending ? (
+            <ActivityIndicator color="#FFF8F5" size="small" />
+          ) : (
+            <>
+              <Send size={18} color="#FFF8F5" />
+              <Text style={styles.sendButtonText}>Send to {partner?.nickname || 'Partner'}</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -97,38 +118,62 @@ const styles = StyleSheet.create({
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   backBtn: {
     padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   titleContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
-  barTitle: {
-    fontSize: theme.typography.sizes.lg,
+  title: {
+    fontFamily: theme.fonts.heading,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
-  content: {
+  subtitle: {
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  canvasContainer: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    justifyContent: 'space-between',
+    padding: 16,
+    justifyContent: 'center',
   },
-  hintText: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.typography.sizes.xs,
-    textAlign: 'center',
-    marginVertical: 8,
+  bottomBar: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    paddingTop: 12,
   },
-  sendBtn: {
-    marginTop: 14,
+  sendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 16,
+    borderRadius: 18,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  sendDisabled: {
+    opacity: 0.45,
+  },
+  sendButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF8F5',
   },
 });
-

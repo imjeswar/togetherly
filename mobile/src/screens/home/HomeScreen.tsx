@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,221 +7,371 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Image,
+  Modal,
+  Alert,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
-  Heart,
-  Calendar,
-  Flame,
-  MessageSquareHeart,
   Palette,
   Camera,
-  Gamepad2,
+  PenTool,
+  Settings as SettingsIcon,
   Sparkles,
+  Heart,
   ChevronRight,
-  Shield,
+  Wifi,
+  WifiOff,
+  Clock,
+  CheckCheck,
+  LogOut,
+  X,
+  Edit2,
+  Trash2,
 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import { useCouple } from '../../context/CoupleContext';
+import { api } from '../../services/api';
+import { socketService } from '../../services/socket';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Avatar } from '../../components/ui/Avatar';
-import { Badge } from '../../components/ui/Badge';
+import { Input } from '../../components/ui/Input';
 import { FlameIcon } from '../../components/ui/FlameIcon';
-import { OfflineBanner } from '../../components/ui/OfflineBanner';
 import { theme } from '../../config/theme';
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { user } = useAuth();
   const {
-    dashboard,
+    space,
     partner,
-    relationship,
-    dailyQuestion,
-    isLoading,
-    refreshDashboard,
-  } = useCouple();
+    userNickname,
+    partnerOnline,
+    socketStatus,
+    unpair,
+    updateNickname,
+    refreshStatus,
+  } = useAuth();
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
+  const [recentDrawings, setRecentDrawings] = useState<any[]>([]);
+  const [recentPhotos, setRecentPhotos] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editingName, setEditingName] = useState(userNickname);
+  const [previewItem, setPreviewItem] = useState<any | null>(null);
+
+  const loadRecentContent = useCallback(async () => {
+    try {
+      const [drawingsRes, photosRes] = await Promise.allSettled([
+        api.getDrawingsGallery(),
+        api.getPhotosGallery(),
+      ]);
+
+      if (drawingsRes.status === 'fulfilled' && drawingsRes.value?.drawings) {
+        setRecentDrawings(drawingsRes.value.drawings);
+      }
+      if (photosRes.status === 'fulfilled' && photosRes.value?.photos) {
+        setRecentPhotos(photosRes.value.photos);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadRecentContent();
+
+    // Listen to real-time incoming drawings and photos
+    const unsubDrawing = socketService.on('incoming_drawing', (drawing: any) => {
+      setRecentDrawings((prev) => [
+        { ...drawing, isFromPartner: true, createdAt: new Date().toISOString() },
+        ...prev,
+      ]);
+    });
+
+    const unsubPhoto = socketService.on('incoming_photo', (photo: any) => {
+      setRecentPhotos((prev) => [
+        { ...photo, isFromPartner: true, createdAt: new Date().toISOString() },
+        ...prev,
+      ]);
+    });
+
+    return () => {
+      unsubDrawing?.();
+      unsubPhoto?.();
+    };
+  }, [loadRecentContent]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refreshStatus(), loadRecentContent()]);
+    setRefreshing(false);
   };
 
-  const daysTogether = relationship?.daysTogether ?? 1;
-  const streakCount = relationship?.streakCount ?? 1;
+  const handleSaveNickname = async () => {
+    if (editingName.trim()) {
+      await updateNickname(editingName.trim());
+      setSettingsOpen(false);
+    }
+  };
+
+  const handleConfirmUnpair = () => {
+    Alert.alert(
+      'Unpair Sanctuary',
+      'Are you sure you want to disconnect? This will unpair both devices from this shared space.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unpair',
+          style: 'destructive',
+          onPress: async () => {
+            setSettingsOpen(false);
+            await unpair();
+          },
+        },
+      ]
+    );
+  };
+
+  // Combine drawings and photos chronologically
+  const combinedFeed = [
+    ...recentDrawings.map((d) => ({ ...d, itemType: 'DRAWING' })),
+    ...recentPhotos.map((p) => ({ ...p, itemType: 'PHOTO' })),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <OfflineBanner />
+      {/* Top Header Bar */}
+      <View style={styles.headerBar}>
+        <View style={styles.brandRow}>
+          <FlameIcon size={26} color={theme.colors.primary} />
+          <Text style={styles.brandTitle}>Togetherly</Text>
+        </View>
+
+        {/* Partner Presence Pill */}
+        <View style={styles.partnerPill}>
+          <View
+            style={[
+              styles.onlineDot,
+              { backgroundColor: partnerOnline ? theme.colors.success : theme.colors.textMuted },
+            ]}
+          />
+          <Text style={styles.partnerPillText} numberOfLines={1}>
+            {partner?.nickname || 'Partner'}
+          </Text>
+          <Text style={styles.partnerStatusSub}>
+            {partnerOnline ? 'Online' : 'Offline'}
+          </Text>
+        </View>
+
+        {/* Settings / Profile Button */}
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={() => {
+            setEditingName(userNickname);
+            setSettingsOpen(true);
+          }}
+        >
+          <SettingsIcon size={20} color={theme.colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
-            refreshing={isLoading}
-            onRefresh={refreshDashboard}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
             tintColor={theme.colors.primary}
           />
         }
+        showsVerticalScrollIndicator={false}
       >
-        {/* Top Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greetingText}>{getGreeting()},</Text>
-            <Text style={styles.userNameText}>{user?.firstName || 'Love'}</Text>
-          </View>
-
-          <View style={styles.couplesRow}>
-            <Avatar url={user?.avatarUrl} name={user?.firstName} size={42} />
-            <View style={styles.flameConnector}>
-              <FlameIcon size={20} isLit />
-            </View>
-            <Avatar
-              url={partner?.avatarUrl}
-              name={partner?.firstName || 'Partner'}
-              size={42}
-            />
-          </View>
-        </View>
-
-        {/* Romantic Banner Heading */}
-        <View style={styles.heroHeading}>
-          <Text style={styles.headline}>Little moments make a big love.</Text>
-        </View>
-
-        {/* Relationship Stats Card */}
-        <Card style={styles.statsCard}>
-          <View style={styles.statBox}>
-            <View style={styles.statIconCircle}>
-              <Calendar size={18} color={theme.colors.secondary} />
-            </View>
-            <Text style={styles.statValue}>{daysTogether}</Text>
-            <Text style={styles.statLabel}>Days Together</Text>
-          </View>
-
-          <View style={styles.statDivider} />
-
-          <View style={styles.statBox}>
-            <View style={styles.statIconCircle}>
-              <Flame size={18} color={theme.colors.primary} />
-            </View>
-            <Text style={styles.statValue}>{streakCount}</Text>
-            <Text style={styles.statLabel}>Day Streak</Text>
-          </View>
-
-          <View style={styles.statDivider} />
-
-          <View style={styles.statBox}>
-            <View style={styles.statIconCircle}>
-              <Sparkles size={18} color={theme.colors.flameRose} />
-            </View>
-            <Text style={styles.statValue}>{relationship?.couplePoints ?? 50}</Text>
-            <Text style={styles.statLabel}>Spark Points</Text>
-          </View>
-        </Card>
-
-        {/* Daily Shared Moment Card */}
-        <Card highlight style={styles.dailyActivityCard}>
-          <View style={styles.dailyHeader}>
-            <Badge label="Today's Shared Moment" variant="gold" />
-            <FlameIcon size={18} isLit />
-          </View>
-
-          <Text style={styles.activityTitle}>
-            {dailyQuestion?.text || "What made you smile thinking of us today?"}
-          </Text>
-
-          <Text style={styles.activitySubtitle}>
-            {dailyQuestion?.bothAnswered
-              ? '✨ Both of you answered! Tap to read each other’s responses.'
-              : dailyQuestion?.userAnswer
-              ? `You answered! Waiting for ${partner?.firstName || 'your partner'}...`
-              : 'Answer together to unlock each other’s thoughts.'}
-          </Text>
-
-          <Button
-            title={
-              dailyQuestion?.bothAnswered
-                ? 'Read Mutual Answers'
-                : dailyQuestion?.userAnswer
-                ? 'View Your Answer'
-                : 'Share Your Answer'
-            }
-            onPress={() => navigation.navigate('DailyQuestion')}
-            variant="primary"
-            size="md"
-            style={styles.activityActionBtn}
-          />
-        </Card>
-
-        {/* Quick Sanctuary Actions */}
-        <Text style={styles.sectionTitle}>Intimate Quick Actions</Text>
-        <View style={styles.quickActionsGrid}>
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('LoveNotes')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIconBg, { backgroundColor: 'rgba(232, 160, 168, 0.15)' }]}>
-              <MessageSquareHeart size={22} color={theme.colors.primary} />
-            </View>
-            <Text style={styles.actionCardTitle}>Love Note</Text>
-            <Text style={styles.actionCardSub}>Surprise message</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('QuickDrawing')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIconBg, { backgroundColor: 'rgba(217, 183, 126, 0.15)' }]}>
-              <Palette size={22} color={theme.colors.secondary} />
-            </View>
-            <Text style={styles.actionCardTitle}>Draw Together</Text>
-            <Text style={styles.actionCardSub}>Quick canvas sketch</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('PhotoMoments')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIconBg, { backgroundColor: 'rgba(244, 63, 94, 0.15)' }]}>
-              <Camera size={22} color="#F43F5E" />
-            </View>
-            <Text style={styles.actionCardTitle}>Photo Moment</Text>
-            <Text style={styles.actionCardSub}>Daily photo snap</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => navigation.navigate('Games')}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIconBg, { backgroundColor: 'rgba(192, 132, 252, 0.15)' }]}>
-              <Gamepad2 size={22} color="#C084FC" />
-            </View>
-            <Text style={styles.actionCardTitle}>Couples Games</Text>
-            <Text style={styles.actionCardSub}>7 playful quizzes</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Security & Sanctuary Health */}
+        {/* HERO CARD: SHARED CANVAS */}
         <TouchableOpacity
-          style={styles.securityBanner}
-          onPress={() => navigation.navigate('Security')}
-          activeOpacity={0.7}
+          style={styles.heroCard}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('Drawing')}
         >
-          <View style={styles.securityLeft}>
-            <Shield size={18} color={theme.colors.secondary} />
-            <Text style={styles.securityText}>Sanctuary Protected with E2EE & Biometrics</Text>
+          <View style={styles.heroContent}>
+            <View style={styles.heroBadgeRow}>
+              <View style={styles.pulseIconBox}>
+                <Sparkles size={16} color={theme.colors.gold} />
+              </View>
+              <Text style={styles.heroBadgeText}>Real-Time Co-Drawing</Text>
+            </View>
+
+            <Text style={styles.heroTitle}>Shared Canvas</Text>
+            <Text style={styles.heroDescription}>
+              Draw simultaneously together in real time on a living canvas.
+            </Text>
+
+            <View style={styles.heroButton}>
+              <Palette size={18} color="#FFF8F5" />
+              <Text style={styles.heroButtonText}>Open Shared Canvas</Text>
+              <ChevronRight size={18} color="#FFF8F5" />
+            </View>
           </View>
-          <ChevronRight size={18} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+
+        {/* ROW OF 2 ACTION CARDS: QUICK DRAW & INSTANT PHOTO */}
+        <View style={styles.actionsRow}>
+          {/* QUICK DRAW */}
+          <TouchableOpacity
+            style={[styles.actionCard, { borderColor: 'rgba(232, 160, 168, 0.35)' }]}
+            activeOpacity={0.88}
+            onPress={() => navigation.navigate('QuickDrawing')}
+          >
+            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(232, 160, 168, 0.2)' }]}>
+              <PenTool size={22} color={theme.colors.primary} />
+            </View>
+            <Text style={styles.cardTitle}>Quick Draw</Text>
+            <Text style={styles.cardSubtitle}>Sketch & send a sweet doodle</Text>
+          </TouchableOpacity>
+
+          {/* INSTANT PHOTO */}
+          <TouchableOpacity
+            style={[styles.actionCard, { borderColor: 'rgba(217, 183, 126, 0.35)' }]}
+            activeOpacity={0.88}
+            onPress={() => navigation.navigate('PhotoMoments')}
+          >
+            <View style={[styles.cardIconBox, { backgroundColor: 'rgba(217, 183, 126, 0.2)' }]}>
+              <Camera size={22} color={theme.colors.gold} />
+            </View>
+            <Text style={styles.cardTitle}>Instant Photo</Text>
+            <Text style={styles.cardSubtitle}>Share a live moment</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* SECTION: RECEIVED FROM PARTNER / RECENT EXCHANGES */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Received from {partner?.nickname || 'Partner'}</Text>
+          <Text style={styles.sectionSub}>Recent drawings & photo moments</Text>
+        </View>
+
+        {combinedFeed.length === 0 ? (
+          <View style={styles.emptyFeedBox}>
+            <Heart size={32} color={theme.colors.textMuted} />
+            <Text style={styles.emptyFeedTitle}>No exchanges yet</Text>
+            <Text style={styles.emptyFeedText}>
+              Send a Quick Draw or snap a photo to surprise your partner!
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.gridContainer}>
+            {combinedFeed.map((item, index) => (
+              <TouchableOpacity
+                key={item.id || index}
+                style={styles.gridItem}
+                activeOpacity={0.85}
+                onPress={() => setPreviewItem(item)}
+              >
+                {item.previewUrl || item.photoUrl ? (
+                  <Image
+                    source={{ uri: item.photoUrl || item.previewUrl }}
+                    style={styles.gridImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.gridPlaceholder}>
+                    <PenTool size={24} color={theme.colors.primary} />
+                  </View>
+                )}
+
+                <View style={styles.gridOverlay}>
+                  <View style={styles.typeBadge}>
+                    <Text style={styles.typeBadgeText}>
+                      {item.itemType === 'DRAWING' ? 'Drawing' : 'Photo'}
+                    </Text>
+                  </View>
+                  <Text style={styles.gridTime}>
+                    {new Date(item.createdAt).toLocaleDateString([], {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </ScrollView>
+
+      {/* FULLSCREEN PREVIEW MODAL */}
+      <Modal visible={Boolean(previewItem)} transparent animationType="fade">
+        <View style={styles.previewBackdrop}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.previewHeader}>
+              <Text style={styles.previewTitle}>
+                {previewItem?.title || (previewItem?.itemType === 'DRAWING' ? 'Drawing' : 'Photo')}
+              </Text>
+              <TouchableOpacity onPress={() => setPreviewItem(null)} style={styles.closeBtn}>
+                <X size={24} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.previewBody}>
+              {previewItem?.photoUrl || previewItem?.previewUrl ? (
+                <Image
+                  source={{ uri: previewItem.photoUrl || previewItem.previewUrl }}
+                  style={styles.previewFullImage}
+                  resizeMode="contain"
+                />
+              ) : null}
+              {previewItem?.caption ? (
+                <Text style={styles.previewCaption}>{previewItem.caption}</Text>
+              ) : null}
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* SETTINGS & UNPAIR MODAL */}
+      <Modal visible={settingsOpen} transparent animationType="slide">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Sanctuary Settings</Text>
+              <TouchableOpacity onPress={() => setSettingsOpen(false)}>
+                <X size={22} color={theme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              <Text style={styles.inputLabel}>Your Nickname</Text>
+              <Input
+                value={editingName}
+                onChangeText={setEditingName}
+                placeholder="Enter nickname"
+                style={{ marginBottom: 16 }}
+              />
+
+              <Button title="Save Nickname" onPress={handleSaveNickname} />
+
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Days in Sanctuary</Text>
+                <Text style={styles.infoValue}>{space?.daysTogether || 1} days</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Real-time Link</Text>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    { color: socketStatus === 'connected' ? theme.colors.success : theme.colors.error },
+                  ]}
+                >
+                  {socketStatus === 'connected' ? 'Connected' : 'Offline'}
+                </Text>
+              </View>
+
+              <TouchableOpacity style={styles.unpairButton} onPress={handleConfirmUnpair}>
+                <LogOut size={18} color={theme.colors.error} />
+                <Text style={styles.unpairText}>Unpair Sanctuary</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -231,162 +381,336 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  header: {
+  headerBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 12,
-    marginBottom: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
-  greetingText: {
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.textSecondary,
-  },
-  userNameText: {
-    fontSize: theme.typography.sizes.xl,
-    fontWeight: '800',
-    color: theme.colors.textPrimary,
-  },
-  couplesRow: {
+  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  flameConnector: {
-    padding: 2,
+  brandTitle: {
+    fontFamily: theme.fonts.heading,
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
   },
-  heroHeading: {
+  partnerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+    maxWidth: 160,
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  partnerPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+  },
+  partnerStatusSub: {
+    fontSize: 10,
+    color: theme.colors.textMuted,
+  },
+  iconBtn: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
+  },
+  heroCard: {
+    backgroundColor: 'rgba(232, 160, 168, 0.12)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(232, 160, 168, 0.35)',
+    padding: 22,
+    marginBottom: 20,
+  },
+  heroContent: {
+    gap: 6,
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  pulseIconBox: {
+    padding: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(217, 183, 126, 0.2)',
+  },
+  heroBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.gold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  heroTitle: {
+    fontFamily: theme.fonts.heading,
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  heroDescription: {
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    lineHeight: 18,
     marginBottom: 16,
   },
-  headline: {
-    fontSize: theme.typography.sizes['2xl'],
-    fontWeight: '800',
-    color: theme.colors.primary,
-    lineHeight: 32,
-  },
-  statsCard: {
+  heroButton: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
     alignItems: 'center',
-    paddingVertical: 18,
-    marginBottom: 18,
-  },
-  statBox: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  statValue: {
-    fontSize: theme.typography.sizes.xl,
-    fontWeight: '800',
-    color: theme.colors.textPrimary,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: theme.colors.cardBorder,
-  },
-  dailyActivityCard: {
-    padding: 20,
-    marginBottom: 24,
-  },
-  dailyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  activityTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    lineHeight: 26,
-    marginBottom: 8,
-  },
-  activitySubtitle: {
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.textSecondary,
-    lineHeight: 20,
-    marginBottom: 18,
-  },
-  activityActionBtn: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    gap: 8,
     alignSelf: 'flex-start',
   },
-  sectionTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
+  heroButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF8F5',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginBottom: 28,
+  },
+  actionCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+  },
+  cardIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
-  quickActionsGrid: {
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    lineHeight: 16,
+  },
+  sectionHeader: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  sectionSub: {
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  emptyFeedBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  emptyFeedTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+    marginTop: 12,
+  },
+  emptyFeedText: {
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    textAlign: 'center',
+    marginTop: 4,
+    maxWidth: 240,
+  },
+  gridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 20,
   },
-  actionCard: {
+  gridItem: {
     width: '48%',
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radii.xl,
-    padding: 16,
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: theme.colors.cardBorder,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  actionIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  gridImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gridPlaceholder: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    backgroundColor: 'rgba(232, 160, 168, 0.08)',
   },
-  actionCardTitle: {
-    fontSize: theme.typography.sizes.base,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
+  gridOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  actionCardSub: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
+  typeBadge: {
+    backgroundColor: 'rgba(232, 160, 168, 0.3)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
-  securityBanner: {
+  typeBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFF8F5',
+  },
+  gridTime: {
+    fontSize: 10,
+    color: theme.colors.textMuted,
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+  },
+  previewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: theme.colors.backgroundSecondary,
-    borderRadius: theme.radii.lg,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.cardBorder,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
-  securityLeft: {
+  previewTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  closeBtn: {
+    padding: 8,
+  },
+  previewBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  previewFullImage: {
+    width: '100%',
+    height: '80%',
+    borderRadius: 16,
+  },
+  previewCaption: {
+    color: '#FFF',
+    fontSize: 15,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: theme.colors.card,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
-  securityText: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.typography.sizes.xs,
-    fontWeight: '500',
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  modalBody: {
+    gap: 12,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginVertical: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: theme.colors.textMuted,
+  },
+  infoValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+  },
+  unpairButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    marginTop: 14,
+  },
+  unpairText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.error,
   },
 });
-

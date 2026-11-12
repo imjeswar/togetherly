@@ -404,3 +404,101 @@ model UserSettings {
   privacyMode        Boolean  @default(false)
 }
 
+// ==========================================
+// REDESIGNED ANONYMOUS TWO-PERSON CONNECTION SYSTEM
+// ==========================================
+
+model CoupleSpace {
+  id              String                  @id @default(uuid())
+  name            String?                 @default("Our Little Space")
+  status          String                  @default("ACTIVE") // ACTIVE, UNPAIRED
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  devices         PairedDevice[]
+  invitations     InvitationCode[]
+  deliveryEvents  DeliveryEvent[]
+  drawings        DrawingMetadata[]
+  photos          PhotoTransferMetadata[]
+
+  @@index([status])
+}
+
+model PairedDevice {
+  id              String       @id @default(uuid())
+  deviceId        String       @unique
+  spaceId         String
+  space           CoupleSpace  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  nickname        String?      @default("Partner")
+  avatarUrl       String?
+  platform        String?      @default("mobile") // android, ios, web
+  pushToken       String?
+  lastActiveAt    DateTime     @default(now())
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([deviceId])
+  @@index([spaceId])
+}
+
+model InvitationCode {
+  id                String       @id @default(uuid())
+  code              String       @unique // 6-character alphanumeric code
+  spaceId           String
+  space             CoupleSpace  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdByDeviceId String
+  isUsed            Boolean      @default(false)
+  usedByDeviceId    String?
+  expiresAt         DateTime
+  createdAt         DateTime     @default(now())
+
+  @@index([code])
+  @@index([spaceId])
+}
+
+model DeliveryEvent {
+  id              String       @id @default(uuid())
+  spaceId         String
+  space           CoupleSpace  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  senderDeviceId  String
+  eventType       String       // DRAWING, PHOTO, SHARED_CANVAS_STROKE
+  payload         String       // JSON payload
+  mediaUrl        String?      // Ephemeral temp file path if media
+  status          String       @default("PENDING") // PENDING, DELIVERED, SEEN
+  expiresAt       DateTime?    // Automatic cleanup
+  deliveredAt     DateTime?
+  seenAt          DateTime?
+  createdAt       DateTime     @default(now())
+
+  @@index([spaceId, status])
+  @@index([senderDeviceId])
+}
+
+model DrawingMetadata {
+  id              String       @id @default(uuid())
+  spaceId         String
+  space           CoupleSpace  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  senderDeviceId  String
+  mode            String       @default("QUICK_DRAW") // QUICK_DRAW, SHARED_CANVAS
+  title           String?      @default("Drawing")
+  canvasData      String       // JSON stroke paths or SVG
+  previewUrl      String?      // Data URI or local storage URI
+  createdAt       DateTime     @default(now())
+
+  @@index([spaceId])
+}
+
+model PhotoTransferMetadata {
+  id              String       @id @default(uuid())
+  spaceId         String
+  space           CoupleSpace  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  senderDeviceId  String
+  photoUrl        String       // Temp URL or Base64 / Local URI
+  caption         String?
+  deliveryStatus  String       @default("PENDING") // PENDING, DELIVERED, SEEN
+  createdAt       DateTime     @default(now())
+
+  @@index([spaceId])
+}
+
+

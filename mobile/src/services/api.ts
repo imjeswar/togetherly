@@ -229,6 +229,38 @@ class ApiService {
     this.request('/security/e2ee/partner-key', { allowOfflineQueue: false });
   getPartnerPublicKey = () => this.getPartnerE2EEPublicKey();
 
+  // --- REDESIGNED ANONYMOUS DEVICE SPACE ---
+  createAnonymousSpace = (payload: { deviceId: string; nickname?: string; platform?: string }) =>
+    this.request('/space/create', { method: 'POST', body: JSON.stringify(payload), allowOfflineQueue: false });
+  joinAnonymousSpace = (payload: { code: string; deviceId: string; nickname?: string; platform?: string }) =>
+    this.request('/space/join', { method: 'POST', body: JSON.stringify(payload), allowOfflineQueue: false });
+  getSpaceStatus = () => this.request('/space/status', { allowOfflineQueue: false });
+  updateSpaceProfile = (payload: { nickname?: string; avatarUrl?: string }) =>
+    this.request('/space/profile', { method: 'PUT', body: JSON.stringify(payload) });
+  unpairSpace = () => this.request('/space/unpair', { method: 'POST', allowOfflineQueue: false });
+
+  // --- DRAWING ---
+  sendQuickDraw = (payload: { eventId?: string; canvasData: any; previewData?: string; title?: string }) =>
+    this.request('/drawing/send', { method: 'POST', body: JSON.stringify(payload) });
+  getDrawingsGallery = () => this.request('/drawing/gallery');
+  getSharedCanvasState = () => this.request('/drawing/shared/state');
+  saveSharedCanvasState = (payload: { canvasData: any; previewData?: string; title?: string }) =>
+    this.request('/drawing/shared/save', { method: 'POST', body: JSON.stringify(payload) });
+
+  // --- PHOTOS ---
+  sendInstantPhoto = (payload: { photoData: string; caption?: string; eventId?: string }) =>
+    this.request('/photo/send', { method: 'POST', body: JSON.stringify(payload) });
+  getPhotosGallery = () => this.request('/photo/gallery');
+  markPhotoSeen = (photoId: string) =>
+    this.request(`/photo/${photoId}/seen`, { method: 'POST' });
+
+  // --- DELIVERIES ---
+  getPendingDeliveries = () => this.request('/delivery/pending', { allowOfflineQueue: false });
+  ackDeliveries = (eventIds: string[]) =>
+    this.request('/delivery/ack', { method: 'POST', body: JSON.stringify({ eventIds }), allowOfflineQueue: false });
+  seenDeliveries = (eventIds: string[]) =>
+    this.request('/delivery/seen', { method: 'POST', body: JSON.stringify({ eventIds }), allowOfflineQueue: false });
+
   // --- PAIRING ---
   getInviteCode = () => this.request('/pairing/code', { allowOfflineQueue: false });
   getPairingCode = () => this.getInviteCode();

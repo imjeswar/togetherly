@@ -1,43 +1,74 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User } from '../types';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { secureStorage } from '../services/secureStore';
-import { biometricService } from '../services/biometric';
-import { e2eeService } from '../services/e2ee';
+import { offlineStorage } from '../services/offlineStorage';
 import { api } from '../services/api';
-import { socketService } from '../services/socket';
+import { socketService, SocketStatus } from '../services/socket';
+
+export interface PairedPartner {
+  id: string;
+  deviceId: string;
+  nickname: string;
+  avatarUrl?: string;
+  isOnline?: boolean;
+  lastActiveAt?: string;
+}
+
+export interface SanctuarySpace {
+  spaceId: string;
+  name?: string;
+  status: string;
+  daysTogether: number;
+  createdAt: string;
+}
 
 interface AuthContextType {
-  user: User | null;
-  token: string | null;
+  deviceId: string | null;
+  spaceId: string | null;
+  space: SanctuarySpace | null;
+  partner: PairedPartner | null;
+  isPaired: boolean;
   isLoading: boolean;
-  isBiometricLocked: boolean;
-  requires2FA: boolean;
-  tempToken: string | null;
-  login: (credentials: { email: string; password?: string }) => Promise<{ requires2FA?: boolean }>;
-  verify2FA: (code: string) => Promise<boolean>;
-  register: (data: any) => Promise<void>;
-  logout: () => Promise<void>;
-  unlockBiometric: (pin?: string) => Promise<boolean>;
+  socketStatus: SocketStatus;
+  partnerOnline: boolean;
+  invitationCode: string | null;
+  inviteUrl: string | null;
+  userNickname: string;
+  // Core actions
+  createSpace: (nickname?: string) => Promise<any>;
+  joinSpace: (code: string, nickname?: string) => Promise<any>;
+  unpair: () => Promise<void>;
+  refreshStatus: () => Promise<void>;
+  updateNickname: (name: string) => Promise<void>;
+  // Legacy aliases for backward compatibility with existing child components
+  user: any;
+  token: string | null;
   refreshUser: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as any);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [spaceId, setSpaceId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [space, setSpace] = useState<SanctuarySpace | null>(null);
+  const [partner, setPartner] = useState<PairedPartner | null>(null);
+  const [isPaired, setIsPaired] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isBiometricLocked, setIsBiometricLocked] = useState<boolean>(false);
-  const [requires2FA, setRequires2FA] = useState<boolean>(false);
-  const [tempToken, setTempToken] = useState<string | null>(null);
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>('disconnected');
+  const [partnerOnline, setPartnerOnline] = useState<boolean>(false);
+  const [invitationCode, setInvitationCode] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [userNickname, setUserNickname] = useState<string>('My Love');
 
-  useEffect(() => {
-    initAuth();
-  }, []);
-
-  const initAuth = async () => {
+  // Initialize Anonymous Device ID and Session
+  const init = useCallback(async () => {
     try {
       setIsLoading(true);
+      const persistentDeviceId = await secureStorage.getOrCreateDeviceId();
+      setDeviceId(persistentDeviceId);
+
       const savedToken = await secureStorage.getAuthToken();
       if (!savedToken) {
         setIsLoading(false);
@@ -46,143 +77,279 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setToken(savedToken);
 
-      // Check biometric preference
-      const isBioEnabled = await secureStorage.getBiometricEnabled();
-      if (isBioEnabled) {
-        setIsBiometricLocked(true);
-      }
+      // Verify and fetch space status from cloud backend
+      const res = await api.getSpaceStatus();
+      if (res && res.spaceId && res.status === 'ACTIVE') {
+        setSpaceId(res.spaceId);
+        await secureStorage.setSpaceId(res.spaceId);
+        setSpace({
+          spaceId: res.spaceId,
+          name: res.name,
+          status: res.status,
+          daysTogether: res.daysTogether || 1,
+          createdAt: res.createdAt,
+        });
 
-      // Fetch user profile
-      const res = await api.getMe();
-      if (res.user) {
-        setUser(res.user);
-        await initE2EEAndSession(res.user);
+        if (res.device?.nickname) {
+          setUserNickname(res.device.nickname);
+        }
+
+        if (res.isPaired && res.partner) {
+          setIsPaired(true);
+          setPartner(res.partner);
+        } else {
+          setIsPaired(false);
+          setPartner(null);
+          if (res.invitation?.code) {
+            setInvitationCode(res.invitation.code);
+            setInviteUrl(res.invitation.inviteUrl);
+          }
+        }
+
+        // Connect real-time socket
+        socketService.connectSpace(res.spaceId, persistentDeviceId);
+      } else {
+        // Space uncoupled or deleted
+        await secureStorage.clearAll();
+        setToken(null);
+        setSpaceId(null);
+        setSpace(null);
+        setPartner(null);
+        setIsPaired(false);
       }
-    } catch {
-      await secureStorage.clearAuthToken();
-      setToken(null);
-      setUser(null);
+    } catch (err) {
+      // If network fails on launch, try to retain offline local space if token exists
+      const offlineSpaceId = await secureStorage.getSpaceId();
+      if (offlineSpaceId) {
+        setSpaceId(offlineSpaceId);
+        setIsPaired(true);
+      }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const initE2EEAndSession = async (currUser: User) => {
-    try {
-      // 1. Initialize E2EE Keypair and register public key
-      const keyPair = await e2eeService.getOrCreateKeyPair();
-      await api.uploadE2EEPublicKey(keyPair.publicKey).catch(() => {});
+  useEffect(() => {
+    init();
+  }, [init]);
 
-      // 2. Ping device session
-      await api.pingSession().catch(() => {});
+  // Real-time socket status and partner presence listeners
+  useEffect(() => {
+    // Pull any queued offline deliveries whenever connected
+    const syncPendingDeliveries = async () => {
+      try {
+        const res = await api.getPendingDeliveries();
+        if (res?.events && res.events.length > 0) {
+          const ackIds: string[] = [];
+          for (const evt of res.events) {
+            ackIds.push(evt.id);
+            if (evt.eventType === 'DRAWING' && evt.data?.canvasData) {
+              await offlineStorage.saveDrawingDraft(
+                evt.data.drawingId || evt.id,
+                evt.data.title || 'Partner Drawing',
+                evt.data.canvasData
+              );
+            }
+          }
+          if (ackIds.length > 0) {
+            await api.ackDeliveries(ackIds);
+          }
+        }
+      } catch {}
+    };
 
-      // 3. Connect real-time socket
-      if (currUser.relationshipId) {
-        await socketService.connect(currUser.relationshipId);
+    const unsubStatus = socketService.onStatusChange((status) => {
+      setSocketStatus(status);
+      if (status === 'connected') {
+        syncPendingDeliveries();
       }
+    });
+
+    const unsubPartnerOnline = socketService.on('partner_online', () => {
+      setPartnerOnline(true);
+      syncPendingDeliveries();
+    });
+
+    const unsubPartnerOffline = socketService.on('partner_offline', () => {
+      setPartnerOnline(false);
+    });
+
+    const unsubPartnerJoined = socketService.on('partner_joined', async (data: any) => {
+      setIsPaired(true);
+      if (data.partner) {
+        setPartner(data.partner);
+      }
+      setPartnerOnline(true);
+      await refreshStatus();
+    });
+
+    const unsubSpaceUnpaired = socketService.on('space_unpaired', async () => {
+      await secureStorage.clearAll();
+      setToken(null);
+      setSpaceId(null);
+      setSpace(null);
+      setPartner(null);
+      setIsPaired(false);
+    });
+
+    return () => {
+      unsubStatus?.();
+      unsubPartnerOnline?.();
+      unsubPartnerOffline?.();
+      unsubPartnerJoined?.();
+      unsubSpaceUnpaired?.();
+    };
+  }, []);
+
+  // 1. CREATE YOUR SPACE
+  const createSpace = async (nickname = 'My Love') => {
+    const activeDeviceId = deviceId || (await secureStorage.getOrCreateDeviceId());
+    const res = await api.createAnonymousSpace({
+      deviceId: activeDeviceId,
+      nickname,
+      platform: 'android',
+    });
+
+    if (res.token) {
+      await secureStorage.setAuthToken(res.token);
+      setToken(res.token);
+    }
+
+    if (res.spaceId) {
+      await secureStorage.setSpaceId(res.spaceId);
+      setSpaceId(res.spaceId);
+      socketService.connectSpace(res.spaceId, activeDeviceId);
+    }
+
+    if (res.invitationCode) {
+      setInvitationCode(res.invitationCode);
+      setInviteUrl(res.inviteUrl);
+    }
+
+    setIsPaired(Boolean(res.isPaired));
+    setUserNickname(nickname);
+
+    return res;
+  };
+
+  // 2. JOIN YOUR PARTNER
+  const joinSpace = async (code: string, nickname = 'My Darling') => {
+    const activeDeviceId = deviceId || (await secureStorage.getOrCreateDeviceId());
+    const res = await api.joinAnonymousSpace({
+      code: code.trim().toUpperCase(),
+      deviceId: activeDeviceId,
+      nickname,
+      platform: 'android',
+    });
+
+    if (res.token) {
+      await secureStorage.setAuthToken(res.token);
+      setToken(res.token);
+    }
+
+    if (res.spaceId) {
+      await secureStorage.setSpaceId(res.spaceId);
+      setSpaceId(res.spaceId);
+      socketService.connectSpace(res.spaceId, activeDeviceId);
+    }
+
+    if (res.partner) {
+      setPartner(res.partner);
+    }
+
+    setIsPaired(true);
+    setUserNickname(nickname);
+
+    return res;
+  };
+
+  // 3. EXPLICIT UNPAIR
+  const unpair = async () => {
+    try {
+      await api.unpairSpace();
     } catch {}
-  };
 
-  const login = async (credentials: { email: string; password?: string }) => {
-    const res = await api.login(credentials);
-
-    if (res.requires2FA) {
-      setRequires2FA(true);
-      setTempToken(res.tempToken);
-      return { requires2FA: true };
-    }
-
-    if (res.token && res.user) {
-      await secureStorage.setAuthToken(res.token);
-      setToken(res.token);
-      setUser(res.user);
-      await initE2EEAndSession(res.user);
-      return { requires2FA: false };
-    }
-
-    throw new Error(res.error || 'Login failed');
-  };
-
-  const verify2FA = async (code: string): Promise<boolean> => {
-    if (!tempToken) throw new Error('No pending 2FA login session');
-
-    const res = await api.verify2FALogin(tempToken, code);
-    if (res.token && res.user) {
-      await secureStorage.setAuthToken(res.token);
-      setToken(res.token);
-      setUser(res.user);
-      setRequires2FA(false);
-      setTempToken(null);
-      await initE2EEAndSession(res.user);
-      return true;
-    }
-    return false;
-  };
-
-  const register = async (data: any) => {
-    const res = await api.register(data);
-    if (res.token && res.user) {
-      await secureStorage.setAuthToken(res.token);
-      setToken(res.token);
-      setUser(res.user);
-      await initE2EEAndSession(res.user);
-    } else {
-      throw new Error(res.error || 'Registration failed');
-    }
-  };
-
-  const logout = async () => {
     socketService.disconnect();
     await secureStorage.clearAll();
-    setUser(null);
+
     setToken(null);
-    setIsBiometricLocked(false);
-    setRequires2FA(false);
-    setTempToken(null);
+    setSpaceId(null);
+    setSpace(null);
+    setPartner(null);
+    setIsPaired(false);
+    setInvitationCode(null);
   };
 
-  const unlockBiometric = async (pin?: string): Promise<boolean> => {
-    if (pin) {
-      const valid = await biometricService.verifyPin(pin);
-      if (valid) {
-        setIsBiometricLocked(false);
-        return true;
-      }
-      return false;
-    }
-
-    const success = await biometricService.authenticate();
-    if (success) {
-      setIsBiometricLocked(false);
-      return true;
-    }
-    return false;
-  };
-
-  const refreshUser = async () => {
+  // 4. REFRESH STATUS
+  const refreshStatus = async () => {
     try {
-      const res = await api.getMe();
-      if (res.user) {
-        setUser(res.user);
+      const res = await api.getSpaceStatus();
+      if (res && res.spaceId) {
+        setSpace({
+          spaceId: res.spaceId,
+          name: res.name,
+          status: res.status,
+          daysTogether: res.daysTogether || 1,
+          createdAt: res.createdAt,
+        });
+
+        if (res.device?.nickname) {
+          setUserNickname(res.device.nickname);
+        }
+
+        if (res.isPaired && res.partner) {
+          setIsPaired(true);
+          setPartner(res.partner);
+        }
+
+        if (res.invitation?.code) {
+          setInvitationCode(res.invitation.code);
+          setInviteUrl(res.invitation.inviteUrl);
+        }
       }
     } catch {}
+  };
+
+  // 5. UPDATE NICKNAME
+  const updateNickname = async (name: string) => {
+    setUserNickname(name);
+    try {
+      await api.updateSpaceProfile({ nickname: name });
+    } catch {}
+  };
+
+  // Legacy adapter values so existing code doesn't crash
+  const legacyUser = {
+    id: deviceId || 'anonymous_user',
+    firstName: userNickname,
+    relationshipId: spaceId,
+    relationship: space ? { id: space.spaceId, daysTogether: space.daysTogether } : null,
+    partner: partner ? { id: partner.id, firstName: partner.nickname, avatarUrl: partner.avatarUrl } : null,
   };
 
   return (
     <AuthContext.Provider
       value={{
-        user,
-        token,
+        deviceId,
+        spaceId,
+        space,
+        partner,
+        isPaired,
         isLoading,
-        isBiometricLocked,
-        requires2FA,
-        tempToken,
-        login,
-        verify2FA,
-        register,
-        logout,
-        unlockBiometric,
-        refreshUser,
+        socketStatus,
+        partnerOnline,
+        invitationCode,
+        inviteUrl,
+        userNickname,
+        createSpace,
+        joinSpace,
+        unpair,
+        refreshStatus,
+        updateNickname,
+        user: legacyUser,
+        token,
+        refreshUser: refreshStatus,
+        logout: unpair,
       }}
     >
       {children}
@@ -191,4 +358,3 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useAuth = () => useContext(AuthContext);
-
