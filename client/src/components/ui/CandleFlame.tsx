@@ -121,3 +121,4 @@ export const CandleFlame: React.FC<CandleFlameProps> = ({
     </div>
   );
 };
+

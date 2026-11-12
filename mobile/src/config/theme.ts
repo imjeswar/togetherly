@@ -1,0 +1,61 @@
+export const theme = {
+  colors: {
+    background: '#0D0B10',
+    backgroundSecondary: '#17131C',
+    card: '#211B27',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
+    cardHover: '#2A2332',
+    primary: '#E8A0A8', // Romantic soft rose
+    primaryMuted: 'rgba(232, 160, 168, 0.15)',
+    secondary: '#D9B77E', // Warm gold
+    secondaryMuted: 'rgba(217, 183, 126, 0.15)',
+    textPrimary: '#FFF8F5',
+    textSecondary: '#B9AEB9',
+    textMuted: '#7A727D',
+    border: 'rgba(255, 255, 255, 0.08)',
+    error: '#F87171',
+    errorMuted: 'rgba(248, 113, 113, 0.15)',
+    success: '#34D399',
+    successMuted: 'rgba(52, 211, 153, 0.15)',
+    warning: '#FBBF24',
+    flameGold: '#D9B77E',
+    flameOrange: '#F97316',
+    flameRose: '#E8A0A8',
+  },
+  typography: {
+    fontFamilies: {
+      regular: 'System',
+      medium: 'System',
+      bold: 'System',
+    },
+    sizes: {
+      xs: 12,
+      sm: 14,
+      base: 16,
+      lg: 18,
+      xl: 20,
+      '2xl': 24,
+      '3xl': 30,
+      '4xl': 36,
+    },
+  },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+    '2xl': 24,
+    '3xl': 32,
+    '4xl': 40,
+  },
+  radii: {
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+    '2xl': 24,
+    full: 9999,
+  },
+};
+

@@ -39,14 +39,36 @@ router.get('/messages', authMiddleware, requireRelationship, async (req: AuthReq
   }
 });
 
-// SEND A MESSAGE
+// SEND A MESSAGE (Supports E2EE & Offline Idempotency)
 router.post('/messages', authMiddleware, requireRelationship, async (req: AuthRequest, res: Response) => {
   try {
     const relationshipId = req.user!.relationshipId!;
     const senderId = req.user!.id;
-    const { text, mediaUrl } = req.body;
+    const {
+      text,
+      mediaUrl,
+      idempotencyKey,
+      isEncrypted,
+      encryptedPayload,
+      nonce,
+      authTag,
+      senderKeyId,
+    } = req.body;
 
-    if (!text && !mediaUrl) {
+    // Check idempotency (prevent duplicate messages on network retry)
+    if (idempotencyKey) {
+      const existing = await prisma.message.findUnique({
+        where: { idempotencyKey },
+        include: {
+          sender: { select: { id: true, firstName: true, avatarUrl: true } },
+        },
+      });
+      if (existing) {
+        return res.status(200).json({ message: existing, deduplicated: true });
+      }
+    }
+
+    if (!text && !mediaUrl && !encryptedPayload) {
       return res.status(400).json({ error: 'Message cannot be empty' });
     }
 
@@ -54,8 +76,14 @@ router.post('/messages', authMiddleware, requireRelationship, async (req: AuthRe
       data: {
         relationshipId,
         senderId,
-        text: text ? text.trim() : '',
+        idempotencyKey: idempotencyKey || null,
+        text: text ? text.trim() : (isEncrypted ? '[End-to-End Encrypted Message]' : ''),
         mediaUrl: mediaUrl || null,
+        isEncrypted: Boolean(isEncrypted),
+        encryptedPayload: encryptedPayload || null,
+        nonce: nonce || null,
+        authTag: authTag || null,
+        senderKeyId: senderKeyId || null,
         reactions: '{}',
       },
       include: {
@@ -149,14 +177,38 @@ router.get('/love-notes', authMiddleware, requireRelationship, async (req: AuthR
   }
 });
 
-// CREATE LOVE NOTE
+// CREATE LOVE NOTE (Supports E2EE & Offline Idempotency)
 router.post('/love-notes', authMiddleware, requireRelationship, async (req: AuthRequest, res: Response) => {
   try {
     const relationshipId = req.user!.relationshipId!;
     const senderId = req.user!.id;
-    const { title, content, unlockCondition = 'MISS_YOU', theme = 'romantic', unlockDate } = req.body;
+    const {
+      title,
+      content,
+      unlockCondition = 'MISS_YOU',
+      theme = 'romantic',
+      unlockDate,
+      idempotencyKey,
+      isEncrypted,
+      encryptedPayload,
+      nonce,
+      authTag,
+    } = req.body;
 
-    if (!title || !content) {
+    if (idempotencyKey) {
+      const existing = await prisma.loveNote.findUnique({
+        where: { idempotencyKey },
+        include: {
+          sender: { select: { id: true, firstName: true, avatarUrl: true } },
+          receiver: { select: { id: true, firstName: true, avatarUrl: true } },
+        },
+      });
+      if (existing) {
+        return res.status(200).json({ note: existing, deduplicated: true });
+      }
+    }
+
+    if (!title || (!content && !encryptedPayload)) {
       return res.status(400).json({ error: 'Title and content are required' });
     }
 
@@ -173,8 +225,13 @@ router.post('/love-notes', authMiddleware, requireRelationship, async (req: Auth
         relationshipId,
         senderId,
         receiverId: partner.id,
+        idempotencyKey: idempotencyKey || null,
         title: title.trim(),
-        content: content.trim(),
+        content: content ? content.trim() : (isEncrypted ? '[End-to-End Encrypted Capsule]' : ''),
+        isEncrypted: Boolean(isEncrypted),
+        encryptedPayload: encryptedPayload || null,
+        nonce: nonce || null,
+        authTag: authTag || null,
         unlockCondition,
         theme,
         unlockDate: unlockDate ? new Date(unlockDate) : null,
@@ -275,3 +332,4 @@ router.post('/love-notes/:id/open', authMiddleware, requireRelationship, async (
 });
 
 export default router;
+

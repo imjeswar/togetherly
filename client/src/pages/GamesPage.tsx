@@ -576,3 +576,4 @@ export const GamesPage: React.FC = () => {
     </div>
   );
 };
+

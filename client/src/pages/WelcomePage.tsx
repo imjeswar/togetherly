@@ -97,46 +97,6 @@ export const WelcomePage: React.FC = () => {
             I Have an Account
           </button>
         </motion.div>
-
-        {/* Demo Fast-Login Strip (for instant reviewer/evaluator convenience) */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.6 }}
-          className="p-4 rounded-2xl glass-panel-subtle border border-togetherly-gold/20 max-w-md w-full"
-        >
-          <div className="flex items-center justify-center gap-1.5 text-xs text-togetherly-gold font-medium mb-2.5">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Instant Evaluation / Demo Accounts</span>
-          </div>
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={() => handleQuickLogin('alex')}
-              className="flex-1 px-3 py-2 rounded-xl bg-togetherly-card hover:bg-togetherly-cardHover border border-white/10 text-xs font-medium text-togetherly-text transition-all flex items-center justify-center gap-2"
-            >
-              <img
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=50"
-                alt="Alex"
-                className="w-5 h-5 rounded-full object-cover"
-              />
-              <span>Enter as Alex</span>
-            </button>
-            <button
-              onClick={() => handleQuickLogin('sarah')}
-              className="flex-1 px-3 py-2 rounded-xl bg-togetherly-card hover:bg-togetherly-cardHover border border-white/10 text-xs font-medium text-togetherly-text transition-all flex items-center justify-center gap-2"
-            >
-              <img
-                src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=50"
-                alt="Sarah"
-                className="w-5 h-5 rounded-full object-cover"
-              />
-              <span>Enter as Sarah</span>
-            </button>
-          </div>
-          <p className="text-[11px] text-togetherly-textMuted mt-2">
-            Pre-paired couple space. Password: <code className="text-togetherly-rose">password123</code>
-          </p>
-        </motion.div>
       </main>
 
       {/* Feature Highlights Grid */}
@@ -168,3 +128,4 @@ export const WelcomePage: React.FC = () => {
     </div>
   );
 };
+

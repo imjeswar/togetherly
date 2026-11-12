@@ -138,35 +138,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Fill Buttons */}
-          <div className="mt-6 pt-6 border-t border-white/5">
-            <p className="text-[11px] text-togetherly-textMuted text-center mb-3 uppercase tracking-wider font-medium">
-              Demo Couple Accounts
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('alex@togetherly.app');
-                  setPassword('password123');
-                }}
-                className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-togetherly-text transition-colors text-center"
-              >
-                Fill <span className="text-togetherly-rose font-medium">Alex</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('sarah@togetherly.app');
-                  setPassword('password123');
-                }}
-                className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-togetherly-text transition-colors text-center"
-              >
-                Fill <span className="text-togetherly-gold font-medium">Sarah</span>
-              </button>
-            </div>
-          </div>
         </GlassCard>
 
         {/* Footer */}
@@ -214,3 +185,4 @@ export const LoginPage: React.FC = () => {
     </div>
   );
 };
+

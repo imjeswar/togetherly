@@ -224,28 +224,6 @@ export const ProfilePage: React.FC = () => {
                   </p>
                 </div>
               </div>
-
-              {/* Demo Switch Action */}
-              <div className="flex sm:flex-col gap-2 shrink-0">
-                {user?.email === 'alex@togetherly.app' && (
-                  <button
-                    onClick={() => quickLogin('sarah')}
-                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-togetherly-gold font-medium border border-white/10 flex items-center gap-1.5 transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Switch to Sarah</span>
-                  </button>
-                )}
-                {user?.email === 'sarah@togetherly.app' && (
-                  <button
-                    onClick={() => quickLogin('alex')}
-                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-togetherly-rose font-medium border border-white/10 flex items-center gap-1.5 transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Switch to Alex</span>
-                  </button>
-                )}
-              </div>
             </div>
           </GlassCard>
 
@@ -611,3 +589,4 @@ export const ProfilePage: React.FC = () => {
     </div>
   );
 };
+

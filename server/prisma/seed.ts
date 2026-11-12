@@ -336,244 +336,87 @@ async function main() {
     });
   }
 
-  // 5. Pre-seeded Couple for instant testing/demo: Alex & Sarah
-  console.log('Seeding demo couple (Alex & Sarah)...');
-  const passwordHash = await bcrypt.hash('password123', 10);
+  // 5. Pre-seeded Couple (Only if explicitly enabled via SEED_DEMO_USERS=true)
+  if (process.env.SEED_DEMO_USERS === 'true') {
+    console.log('Seeding demo couple (Alex & Sarah)...');
+    const passwordHash = await bcrypt.hash('password123', 10);
 
-  // Check if relationship exists
-  let relationship = await prisma.relationship.findUnique({
-    where: { code: 'TOGETH' },
-  });
-
-  if (!relationship) {
-    // 2 years together anniversary: e.g. 2024-06-15
-    const anniversaryDate = new Date('2024-06-15T00:00:00.000Z');
-    relationship = await prisma.relationship.create({
-      data: {
-        code: 'TOGETH',
-        anniversaryDate,
-        status: 'ACTIVE',
-        relationshipType: 'DATING',
-        isLongDistance: false,
-        streakCount: 14,
-        couplePoints: 380,
-      },
+    // Check if relationship exists
+    let relationship = await prisma.relationship.findUnique({
+      where: { code: 'TOGETH' },
     });
-  }
 
-  // Alex
-  const userAlex = await prisma.user.upsert({
-    where: { email: 'alex@togetherly.app' },
-    update: { relationshipId: relationship.id },
-    create: {
-      email: 'alex@togetherly.app',
-      passwordHash,
-      firstName: 'Alex',
-      lastName: 'Rivers',
-      dateOfBirth: new Date('1996-05-14'),
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      relationshipId: relationship.id,
-      profile: {
-        create: {
-          bio: 'Coffee lover, stargazing enthusiast, and always looking for our next road trip.',
-          nickname: 'Al',
-          loveLanguage: 'Quality Time',
-          interests: JSON.stringify(['Travel', 'Photography', 'Cooking', 'Hiking']),
+    if (!relationship) {
+      const anniversaryDate = new Date('2024-06-15T00:00:00.000Z');
+      relationship = await prisma.relationship.create({
+        data: {
+          code: 'TOGETH',
+          anniversaryDate,
+          status: 'ACTIVE',
+          relationshipType: 'DATING',
+          isLongDistance: false,
+          streakCount: 14,
+          couplePoints: 380,
+        },
+      });
+    }
+
+    const userAlex = await prisma.user.upsert({
+      where: { email: 'alex@togetherly.app' },
+      update: { relationshipId: relationship.id },
+      create: {
+        email: 'alex@togetherly.app',
+        passwordHash,
+        firstName: 'Alex',
+        lastName: 'Rivers',
+        dateOfBirth: new Date('1996-05-14'),
+        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        relationshipId: relationship.id,
+        profile: {
+          create: {
+            bio: 'Coffee lover, stargazing enthusiast, and always looking for our next road trip.',
+            nickname: 'Al',
+            loveLanguage: 'Quality Time',
+            interests: JSON.stringify(['Travel', 'Photography', 'Cooking', 'Hiking']),
+          },
+        },
+        settings: {
+          create: { theme: 'dark', pushNotifications: true, soundEffects: true },
         },
       },
-      settings: {
-        create: {
-          theme: 'dark',
-          pushNotifications: true,
-          soundEffects: true,
+    });
+
+    const userSarah = await prisma.user.upsert({
+      where: { email: 'sarah@togetherly.app' },
+      update: { relationshipId: relationship.id },
+      create: {
+        email: 'sarah@togetherly.app',
+        passwordHash,
+        firstName: 'Sarah',
+        lastName: 'Miller',
+        dateOfBirth: new Date('1997-08-22'),
+        avatarUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
+        relationshipId: relationship.id,
+        profile: {
+          create: {
+            bio: 'Book collector, tea drinker, and fondue chef in training.',
+            nickname: 'Sare',
+            loveLanguage: 'Words of Affirmation',
+            interests: JSON.stringify(['Reading', 'Cooking', 'Art', 'Music']),
+          },
+        },
+        settings: {
+          create: { theme: 'dark', pushNotifications: true, soundEffects: true },
         },
       },
-    },
-  });
-
-  // Sarah
-  const userSarah = await prisma.user.upsert({
-    where: { email: 'sarah@togetherly.app' },
-    update: { relationshipId: relationship.id },
-    create: {
-      email: 'sarah@togetherly.app',
-      passwordHash,
-      firstName: 'Sarah',
-      lastName: 'Miller',
-      dateOfBirth: new Date('1997-08-22'),
-      avatarUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-      relationshipId: relationship.id,
-      profile: {
-        create: {
-          bio: 'Book collector, tea drinker, and fondue chef in training.',
-          nickname: 'Sare',
-          loveLanguage: 'Words of Affirmation',
-          interests: JSON.stringify(['Reading', 'Cooking', 'Art', 'Music']),
-        },
-      },
-      settings: {
-        create: {
-          theme: 'dark',
-          pushNotifications: true,
-          soundEffects: true,
-        },
-      },
-    },
-  });
-
-  // Grant Initial Achievements
-  const firstSpark = await prisma.achievement.findUnique({ where: { code: 'FIRST_SPARK' } });
-  const first7Days = await prisma.achievement.findUnique({ where: { code: 'FIRST_7_DAYS' } });
-  if (firstSpark) {
-    await prisma.userAchievement.upsert({
-      where: { achievementId_userId: { achievementId: firstSpark.id, userId: userAlex.id } },
-      update: {},
-      create: { achievementId: firstSpark.id, userId: userAlex.id },
-    });
-    await prisma.userAchievement.upsert({
-      where: { achievementId_userId: { achievementId: firstSpark.id, userId: userSarah.id } },
-      update: {},
-      create: { achievementId: firstSpark.id, userId: userSarah.id },
-    });
-  }
-  if (first7Days) {
-    await prisma.userAchievement.upsert({
-      where: { achievementId_userId: { achievementId: first7Days.id, userId: userAlex.id } },
-      update: {},
-      create: { achievementId: first7Days.id, userId: userAlex.id },
-    });
-    await prisma.userAchievement.upsert({
-      where: { achievementId_userId: { achievementId: first7Days.id, userId: userSarah.id } },
-      update: {},
-      create: { achievementId: first7Days.id, userId: userSarah.id },
-    });
-  }
-
-  // Seed sample question answers
-  const firstQ = await prisma.question.findFirst();
-  if (firstQ) {
-    await prisma.questionResponse.createMany({
-      data: [
-        {
-          questionId: firstQ.id,
-          userId: userAlex.id,
-          relationshipId: relationship.id,
-          answer: 'I always have to organize my books by color and reheat my tea exactly twice.',
-          isHidden: false,
-          reaction: '❤️',
-          partnerComment: 'Haha you really do reheat that tea non-stop!',
-        },
-        {
-          questionId: firstQ.id,
-          userId: userSarah.id,
-          relationshipId: relationship.id,
-          answer: 'I talk softly to our houseplants whenever I water them on Sunday mornings.',
-          isHidden: false,
-          reaction: '🥰',
-          partnerComment: 'It is the most adorable thing I have ever witnessed.',
-        },
-      ],
-    });
-  }
-
-  // Seed sample Love Note
-  const existingNote = await prisma.loveNote.findFirst({
-    where: { relationshipId: relationship.id },
-  });
-  if (!existingNote) {
-    await prisma.loveNote.create({
-      data: {
-        relationshipId: relationship.id,
-        senderId: userAlex.id,
-        receiverId: userSarah.id,
-        unlockCondition: 'MISS_YOU',
-        title: 'Open when you miss my hugs',
-        content: 'No matter how busy our schedules get today, remember that my heart is always right beside you. Can’t wait for tonight’s movie!',
-        theme: 'romantic',
-        isOpened: false,
-      },
     });
 
-    await prisma.loveNote.create({
-      data: {
-        relationshipId: relationship.id,
-        senderId: userSarah.id,
-        receiverId: userAlex.id,
-        unlockCondition: 'SMILE',
-        title: 'Open when you need a smile',
-        content: 'Remember that time we got caught in the torrential rain in Lisbon and ran into the bakery soaked? You are my greatest adventure.',
-        theme: 'starlight',
-        isOpened: true,
-        openedAt: new Date(),
-      },
-    });
-  }
-
-  // Seed sample photo memory
-  const existingPhoto = await prisma.photo.findFirst({
-    where: { relationshipId: relationship.id },
-  });
-  if (!existingPhoto) {
-    await prisma.photo.create({
-      data: {
-        relationshipId: relationship.id,
-        userId: userAlex.id,
-        prompt: 'Show something that reminds you of me',
-        photoUrl: 'https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=800&q=80',
-        caption: 'Our favorite Sunday cafe booth where we spent hours talking.',
-        challengeDate: '2026-11-10',
-      },
-    });
-    await prisma.photo.create({
-      data: {
-        relationshipId: relationship.id,
-        userId: userSarah.id,
-        prompt: 'Show something that reminds you of me',
-        photoUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
-        caption: 'The sunrise beach we visited last summer.',
-        challengeDate: '2026-11-10',
-      },
-    });
-  }
-
-  // Seed sample milestone memory
-  const existingMemory = await prisma.memory.findFirst({
-    where: { relationshipId: relationship.id },
-  });
-  if (!existingMemory) {
-    await prisma.memory.create({
-      data: {
-        relationshipId: relationship.id,
-        title: 'Our First Road Trip',
-        description: 'Drove up the coastal highway, sang 90s songs at the top of our lungs, and watched the stars from the hood of the car.',
-        date: new Date('2024-08-20'),
-        type: 'MILESTONE',
-        mediaUrl: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=800&q=80',
-      },
-    });
-  }
-
-  // Seed sample matched date idea
-  const firstDateIdea = await prisma.dateIdea.findFirst();
-  if (firstDateIdea) {
-    await prisma.savedDateIdea.create({
-      data: {
-        dateIdeaId: firstDateIdea.id,
-        relationshipId: relationship.id,
-        likedByUsers: JSON.stringify([userAlex.id, userSarah.id]),
-        isMutualMatch: true,
-        isCompleted: false,
-        scheduledFor: new Date('2026-11-15T19:00:00Z'),
-        notes: 'Bring the fairy lights and lavender candles!',
-      },
-    });
+    console.log('Demo couple seeded.');
+  } else {
+    console.log('Production mode: No test users seeded.');
   }
 
   console.log('Seeding completed successfully!');
-  console.log('Demo accounts ready:');
-  console.log('  Alex:  alex@togetherly.app  / password123');
-  console.log('  Sarah: sarah@togetherly.app / password123');
-  console.log('  Pairing code: TOGETH');
 }
 
 main()
@@ -584,3 +427,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

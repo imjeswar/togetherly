@@ -94,30 +94,6 @@ export const Header: React.FC = () => {
 
         {/* Right Actions */}
         <div className="flex items-center gap-3">
-          {/* Quick Demo Switcher (Instant Partner Switch for Evaluation) */}
-          <div className="hidden md:flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-2.5 py-1 text-xs text-togetherly-textMuted">
-            <span className="text-[11px] uppercase tracking-wider text-togetherly-gold font-medium">Demo:</span>
-            {user?.email === 'alex@togetherly.app' ? (
-              <button
-                onClick={() => quickLogin('sarah')}
-                className="text-togetherly-rose hover:text-white transition-colors flex items-center gap-1 font-medium"
-                title="Switch view to Sarah"
-              >
-                <span>Switch to Sarah</span>
-                <RefreshCw className="w-3 h-3" />
-              </button>
-            ) : user?.email === 'sarah@togetherly.app' ? (
-              <button
-                onClick={() => quickLogin('alex')}
-                className="text-togetherly-rose hover:text-white transition-colors flex items-center gap-1 font-medium"
-                title="Switch view to Alex"
-              >
-                <span>Switch to Alex</span>
-                <RefreshCw className="w-3 h-3" />
-              </button>
-            ) : null}
-          </div>
-
           {/* Notifications Bell */}
           <div className="relative">
             <button
@@ -199,3 +175,4 @@ export const Header: React.FC = () => {
     </header>
   );
 };
+

@@ -40,3 +40,4 @@ export const GlassCard: React.FC<GlassCardProps> = ({
     </motion.div>
   );
 };
+

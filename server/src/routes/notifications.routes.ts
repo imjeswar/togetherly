@@ -46,3 +46,4 @@ router.post('/read-all', authMiddleware, async (req: AuthRequest, res: Response)
 });
 
 export default router;
+

@@ -370,3 +370,4 @@ export const PairingPage: React.FC = () => {
     </div>
   );
 };
+

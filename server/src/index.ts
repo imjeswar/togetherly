@@ -23,6 +23,7 @@ import aiRoutes from './routes/ai.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import achievementsRoutes from './routes/achievements.routes.js';
+import securityRoutes from './routes/security.routes.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -36,7 +37,10 @@ setupSocketIO(server);
 // Middleware
 app.use(
   cors({
-    origin: [CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl) or matching dev origins
+      callback(null, true);
+    },
     credentials: true,
   })
 );
@@ -72,6 +76,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/achievements', achievementsRoutes);
+app.use('/api/security', securityRoutes);
 
 // Global Error Handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -81,7 +86,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Togetherly Server running on http://localhost:${PORT}`);
+server.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`Togetherly Server running on http://0.0.0.0:${PORT}`);
   console.log(`Socket.IO real-time engine ready`);
 });
+

@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "Togetherly",
+    "slug": "togetherly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "togetherly",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0B10"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.togetherly.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Togetherly needs access to your camera to capture private photo moments and memory snaps for your partner.",
+        "NSPhotoLibraryUsageDescription": "Togetherly needs access to your photo library to share and preserve your romantic memories.",
+        "NSPhotoLibraryAddUsageDescription": "Togetherly needs permission to save shared couple photos and drawings to your gallery.",
+        "NSFaceIDUsageDescription": "Togetherly uses Face ID / Touch ID to secure your intimate couple sanctuary from prying eyes."
+      }
+    },
+    "android": {
+      "package": "com.togetherly.app",
+      "versionCode": 1,
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D0B10"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Togetherly needs access to your camera to take private photo moments."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Togetherly needs access to your photos to save and upload your shared memories."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Togetherly uses Face ID to lock your intimate couple sanctuary."
+        }
+      ],
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "togetherly-couples-app"
+      }
+    }
+  }
+}
+

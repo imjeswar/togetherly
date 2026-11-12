@@ -243,3 +243,4 @@ export interface DashboardData {
   pendingLoveNotesCount: number;
   unreadNotificationsCount: number;
 }
+

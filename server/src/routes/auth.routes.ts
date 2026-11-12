@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { generateUniqueCode } from './pairing.routes.js';
 import { prisma } from '../prisma.js';
 import { authMiddleware, AuthRequest } from '../middleware/auth.js';
 
@@ -53,6 +54,7 @@ router.post('/register', async (req: Request, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
+    const code = await generateUniqueCode();
 
     const user = await prisma.user.create({
       data: {
@@ -62,6 +64,14 @@ router.post('/register', async (req: Request, res: Response) => {
         lastName: data.lastName,
         dateOfBirth: new Date(data.dateOfBirth),
         avatarUrl: data.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        relationship: {
+          create: {
+            code,
+            status: 'ACTIVE',
+            relationshipType: data.relationshipType || 'DATING',
+            isLongDistance: Boolean(data.isLongDistance),
+          },
+        },
         profile: {
           create: {
             bio: data.bio || '',
@@ -82,6 +92,7 @@ router.post('/register', async (req: Request, res: Response) => {
       include: {
         profile: true,
         settings: true,
+        relationship: true,
       },
     });
 
@@ -99,7 +110,10 @@ router.post('/register', async (req: Request, res: Response) => {
         dateOfBirth: user.dateOfBirth,
         profile: user.profile,
         relationshipId: user.relationshipId,
+        relationship: user.relationship,
+        partner: null,
       },
+      code: user.relationship?.code,
       token,
     });
   } catch (error: any) {
@@ -313,4 +327,62 @@ router.post('/reset-password', async (req: Request, res: Response) => {
   return res.json({ message: 'Password has been reset successfully. Please log in.' });
 });
 
+// DELETE ACCOUNT (PERMANENT)
+router.delete('/account', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { password, confirmDelete } = req.body;
+
+    if (!confirmDelete) {
+      return res.status(400).json({ error: 'Explicit confirmation required to delete account' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { relationship: { include: { users: true } } },
+    });
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (password) {
+      const isMatch = await bcrypt.compare(password, user.passwordHash);
+      if (!isMatch) return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    const relationshipId = user.relationshipId;
+
+    // Disconnect user from relationship
+    if (relationshipId) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { relationshipId: null },
+      });
+
+      // If the partner had already left or no other users exist, clean up relationship
+      const remainingUsers = user.relationship?.users.filter((u) => u.id !== userId) || [];
+      if (remainingUsers.length === 0) {
+        await prisma.relationship.delete({ where: { id: relationshipId } });
+      }
+    }
+
+    // Delete personal records
+    await prisma.userSession.deleteMany({ where: { userId } });
+    await prisma.userKey.deleteMany({ where: { userId } });
+    await prisma.userProfile.deleteMany({ where: { userId } });
+    await prisma.userSettings.deleteMany({ where: { userId } });
+    await prisma.notification.deleteMany({ where: { userId } });
+    await prisma.userAchievement.deleteMany({ where: { userId } });
+
+    // Delete user
+    await prisma.user.delete({ where: { id: userId } });
+
+    res.clearCookie('token');
+    return res.json({ success: true, message: 'Account and associated personal data permanently removed' });
+  } catch (error) {
+    console.error('Account delete error:', error);
+    return res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
 export default router;
+

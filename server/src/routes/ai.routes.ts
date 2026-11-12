@@ -53,3 +53,4 @@ router.post('/anniversary', authMiddleware, async (req: AuthRequest, res: Respon
 });
 
 export default router;
+

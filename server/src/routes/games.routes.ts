@@ -380,3 +380,4 @@ router.post('/session/:sessionId/respond', authMiddleware, requireRelationship, 
 });
 
 export default router;
+

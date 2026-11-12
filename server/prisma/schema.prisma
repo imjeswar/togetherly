@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -16,6 +16,9 @@ model User {
   avatarUrl       String?
   dateOfBirth     DateTime
   emailVerified   Boolean            @default(true)
+  twoFactorEnabled Boolean           @default(false)
+  twoFactorSecret String?
+  twoFactorBackupCodes String?       @default("[]") // JSON array of backup hashes
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -24,6 +27,8 @@ model User {
 
   profile         UserProfile?
   settings        UserSettings?
+  sessions        UserSession[]
+  e2eeKey         UserKey?
 
   sentInvitations     PartnerInvitation[] @relation("SentInvitations")
   receivedInvitations  PartnerInvitation[] @relation("ReceivedInvitations")
@@ -39,6 +44,35 @@ model User {
 
   @@index([email])
   @@index([relationshipId])
+}
+
+model UserSession {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId     String
+  deviceName   String?
+  os           String?   // "iOS", "Android", "Web"
+  ipAddress    String?
+  pushToken    String?
+  lastActiveAt DateTime  @default(now())
+  isRevoked    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model UserKey {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicKey    String    // Base64 ECDH / X25519 public key
+  keyAlgorithm String    @default("ECDH-X25519-AES-GCM")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
 }
 
 model UserProfile {
@@ -118,6 +152,7 @@ model Question {
 
 model QuestionResponse {
   id              String    @id @default(uuid())
+  idempotencyKey  String?   @unique
   questionId      String
   question        Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
   userId          String
@@ -151,6 +186,7 @@ model DailyChallenge {
 
 model Photo {
   id              String       @id @default(uuid())
+  idempotencyKey  String?      @unique
   relationshipId  String
   relationship    Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
   userId          String
@@ -222,36 +258,47 @@ model Drawing {
 }
 
 model Message {
-  id             String       @id @default(uuid())
-  relationshipId String
-  relationship   Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
-  senderId       String
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  text           String
-  mediaUrl       String?
-  reactions      String       @default("{}") // JSON { userId: "❤️" }
-  isRead         Boolean      @default(false)
-  createdAt      DateTime     @default(now())
+  id               String       @id @default(uuid())
+  idempotencyKey   String?      @unique
+  relationshipId   String
+  relationship     Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  senderId         String
+  sender           User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  text             String
+  mediaUrl         String?
+  isEncrypted      Boolean      @default(false)
+  encryptedPayload String?      // Base64 ciphertext for E2EE
+  nonce            String?      // Initialization Vector (IV)
+  authTag          String?      // GCM Auth Tag
+  senderKeyId      String?      // Fingerprint / ID of sender's public key
+  reactions        String       @default("{}") // JSON { userId: "❤️" }
+  isRead           Boolean      @default(false)
+  createdAt        DateTime     @default(now())
 
   @@index([relationshipId])
 }
 
 model LoveNote {
-  id              String       @id @default(uuid())
-  relationshipId  String
-  relationship    Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
-  senderId        String
-  sender          User         @relation("SentLoveNotes", fields: [senderId], references: [id], onDelete: Cascade)
-  receiverId      String
-  receiver        User         @relation("ReceivedLoveNotes", fields: [receiverId], references: [id], onDelete: Cascade)
-  unlockCondition String       // MISS_YOU, SAD, MOTIVATION, SMILE, ANNIVERSARY, SPECIAL_DAY
-  title           String
-  content         String
-  theme           String       @default("romantic") // romantic, starlight, golden, whisper
-  unlockDate      DateTime?
-  isOpened        Boolean      @default(false)
-  openedAt        DateTime?
-  createdAt       DateTime     @default(now())
+  id               String       @id @default(uuid())
+  idempotencyKey   String?      @unique
+  relationshipId   String
+  relationship     Relationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  senderId         String
+  sender           User         @relation("SentLoveNotes", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId       String
+  receiver         User         @relation("ReceivedLoveNotes", fields: [receiverId], references: [id], onDelete: Cascade)
+  unlockCondition  String       // MISS_YOU, SAD, MOTIVATION, SMILE, ANNIVERSARY, SPECIAL_DAY
+  title            String
+  content          String
+  isEncrypted      Boolean      @default(false)
+  encryptedPayload String?      // Base64 ciphertext for E2EE
+  nonce            String?      // Initialization Vector (IV)
+  authTag          String?      // GCM Auth Tag
+  theme            String       @default("romantic") // romantic, starlight, golden, whisper
+  unlockDate       DateTime?
+  isOpened         Boolean      @default(false)
+  openedAt         DateTime?
+  createdAt        DateTime     @default(now())
 
   @@index([relationshipId])
 }
@@ -356,3 +403,4 @@ model UserSettings {
   theme              String   @default("dark")
   privacyMode        Boolean  @default(false)
 }
+

@@ -197,54 +197,118 @@ You can also create completely fresh accounts using the registration flow to tes
 
 ---
 
+## 📱 Native Mobile Application (Android & iOS)
+
+Togetherly features a production-grade native mobile client built using **React Native & Expo (SDK 52)**, retaining the full Node.js / Express / PostgreSQL backend and providing:
+
+### 1. Genuine End-to-End Encryption (E2EE)
+- **Key Agreement**: ECDH (P-256 / X25519) key agreement with AES-256-GCM encryption.
+- **Hardware Keychain**: Private keys reside strictly in device secure hardware (`expo-secure-store`).
+- **Encrypted Payloads**: Love notes, private letters, and sketches are encrypted on-device before transmission and decrypted exclusively on partner hardware.
+
+### 2. Device Security & Biometrics
+- **Biometric Application Lock**: Native Face ID, Touch ID, and Android Biometric Prompt integration (`expo-local-authentication`) with fallback PIN protection.
+- **Two-Factor Authentication (2FA)**: RFC 6238-compliant TOTP authenticator app support with emergency single-use recovery codes.
+- **Device Session Management**: Device registration, platform tracking, and remote session revocation.
+- **Data Portability & Erasure**: Full JSON relationship archive export and one-click cascading account erasure.
+
+### 3. Offline-First Synchronization Engine
+- **Local Persistence**: On-device SQLite database (`expo-sqlite`) caching daily questions, shared memories, drawings, photos, and love notes.
+- **Sync Engine**: Network listener (`@react-native-community/netinfo`), unique UUID operation IDs, idempotency keys, and automated replay with exponential backoff on reconnection.
+
+### 4. Native Home-Screen Widgets
+- **Android Widgets (`AppWidgetProvider`)**:
+  - *Our Little Space*: Days together, streak, and daily question.
+  - *Quick Drawing*: 1-tap launcher to `togetherly://canvas/quick`.
+  - *Photo Memories*: Latest shared couple photo with quick camera action (`togetherly://photos`).
+  - *Daily Question*: Current intimacy question and mutual response status.
+- **iOS Widgets (SwiftUI `WidgetKit`)**:
+  - `RelationshipWidget`: Days together, flame, and streak.
+  - `DailyQuestionWidget`: Question preview with `.privacySensitive()` redaction on lock screen.
+  - `PhotoMemoryWidget`: Shared couple snapshot.
+  - `QuickDrawingWidget`: Fast doodle launcher.
+  - `LoveNotesWidget`: Sealed/unlocked love letter preview with lock screen privacy.
+
+---
+
 ## 📁 Project Architecture
 
 ```
 Togetherly/
+├── mobile/                     # React Native & Expo Mobile Application
+│   ├── android/                # Native Android manifests, layouts & AppWidgetProviders
+│   ├── ios/TogetherlyWidgets/  # Native iOS SwiftUI WidgetKit extension & App Intents
+│   ├── src/
+│   │   ├── components/         # FlameIcon, Canvas, Card, Button, Input, OfflineBanner
+│   │   ├── config/             # Theme (#0D0B10, #E8A0A8, #D9B77E), env, endpoints
+│   │   ├── context/            # AuthContext, SyncContext, CoupleContext
+│   │   ├── navigation/         # RootNavigator, AuthStack, AppTabs, Deep Linking
+│   │   ├── screens/            # Welcome, Login, Register, Pairing, Home, Drawing, Notes...
+│   │   ├── services/           # E2EE (AES-GCM/ECDH), SQLite, SyncEngine, Biometrics, API
+│   │   └── types/              # Unified TypeScript definitions
+│   ├── app.json                # Expo SDK 52 configuration, permissions & schemes
+│   ├── PRIVACY_POLICY.md       # Privacy Policy (E2EE, biometrics, camera/photos)
+│   └── TERMS.md                # Terms and Conditions (18+ adult restriction)
+│
 ├── client/                     # Vite + React 18 + TypeScript Frontend
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── layout/         # Header, Sidebar, BottomNav, AppLayout
-│   │   │   └── ui/             # CandleFlame, GlassCard, Modal
-│   │   ├── context/            # AuthContext (state, login, register, quickLogin)
-│   │   ├── pages/              # Welcome, Login, Register, Pairing, Home, Connect, Games, Memories, DateIdeas, Profile
-│   │   ├── services/           # Centralized API service & Socket.IO client
-│   │   ├── types/              # Comprehensive TypeScript interfaces
-│   │   ├── App.tsx             # React Router routing & ProtectedRoute
-│   │   ├── index.css           # Tailwind CSS & custom glassmorphism
-│   │   └── main.tsx            # Application entrypoint
-│   ├── tailwind.config.js      # Togetherly color palette & animations
-│   ├── tsconfig.json
-│   └── vite.config.ts          # Port 3000 & API reverse proxy
+│   │   ├── components/         # Header, Sidebar, BottomNav, AppLayout, CandleFlame
+│   │   ├── context/            # AuthContext
+│   │   ├── pages/              # Welcome, Login, Register, Pairing, Home, Connect, Games...
+│   │   └── services/           # API service & Socket.IO client
+│   └── vite.config.ts
 │
 ├── server/                     # Node.js + Express + TypeScript Backend
 │   ├── prisma/
-│   │   ├── schema.prisma       # 23 normalized database models
-│   │   └── seed.ts             # Rich seed script (100+ questions, games, dates, demo accounts)
+│   │   ├── schema.prisma       # 23 normalized database models with E2EE & session models
+│   │   ├── seed.ts             # Pristine production seed (100+ questions, 7 games, 40+ dates)
+│   │   └── clean-test-users.ts # Test users cleanup utility
 │   ├── src/
-│   │   ├── middleware/         # authMiddleware (JWT, cookies), requireRelationship
-│   │   ├── routes/             # auth, pairing, dashboard, questions, photos, games, canvas, chat, memories, date-ideas, ai, notifications, settings, achievements
-│   │   ├── services/           # streakService, achievementService, aiService
-│   │   ├── prisma.ts           # Shared PrismaClient instance
-│   │   ├── socket.ts           # Socket.IO real-time event handlers
-│   │   └── index.ts            # Server bootstrap & middleware
-│   ├── .env                    # Environment variables
-│   └── tsconfig.json
+│   │   ├── routes/             # auth, security, pairing, questions, drawings, love-notes...
+│   │   ├── tests/              # mobile-e2e-test.ts integration suite
+│   │   └── index.ts            # Server entrypoint
+│   └── .env
 │
-└── package.json                # Root package with concurrent dev scripts
+└── package.json                # Monorepo task orchestration
+```
+
+---
+
+## 🚀 Running the Project
+
+### 1. Backend Server
+```bash
+npm --prefix server run dev
+# Starts on http://localhost:5000 (API at http://localhost:5000/api)
+```
+
+### 2. Web Client
+```bash
+npm --prefix client run dev
+# Starts on http://localhost:3000
+```
+
+### 3. Mobile App (Expo)
+```bash
+cd mobile
+npm start
+# Press 'a' for Android emulator or 'i' for iOS simulator
 ```
 
 ---
 
 ## 🔒 Security Measures
-- **IDOR Protection**: All queries filter by `relationshipId` verified against the authenticated user's session.
-- **Strict Verification**: Answers to daily questions remain confidential until both partners have submitted.
-- **Password Security**: Strong bcrypt hashing with salt rounds.
-- **File Upload Security**: Restricted file types and 10MB limits via Multer.
-- **Cookie Security**: HTTP-only tokens prevent cross-site scripting (XSS) credential leaks.
+- **Genuine End-to-End Encryption**: AES-256-GCM + ECDH key exchange for private notes and drawings.
+- **On-Device Biometrics**: Face ID / Fingerprint lock with zero server biometric exposure.
+- **Two-Factor Authentication**: RFC 6238 TOTP with emergency recovery codes.
+- **Device Session Management**: Instant remote session revocation from any device.
+- **Idempotency Safeguards**: Unique request idempotency keys prevent duplicate records across retries.
+- **IDOR Protection**: All database queries strictly scope to verified couple `relationshipId`.
+- **Zero Mock Users**: Production database is pristine with zero test user contamination.
 
 ---
 
 ## 📜 License
 Created for Togetherly — *"A little moment. A stronger connection."*
 All rights reserved.
+

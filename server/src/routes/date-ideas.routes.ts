@@ -252,3 +252,4 @@ router.post('/:id/complete', authMiddleware, requireRelationship, async (req: Au
 });
 
 export default router;
+

@@ -25,3 +25,4 @@ export function joinRelationshipRoom(relationshipId: string, userId: string) {
   const s = getSocket();
   s.emit('join_relationship', { relationshipId, userId });
 }
+
