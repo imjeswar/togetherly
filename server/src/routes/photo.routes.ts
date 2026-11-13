@@ -129,6 +129,7 @@ router.post(
 
       // 3. TRUE BACKGROUND FCM DELIVERY
       // Look up partner device token even if partner app is closed/sleeping
+      console.log(`[PHOTO-SEND] Space ${spaceId}: Photo ${photo.id} saved by ${senderDeviceId}. Checking partner...`);
       prisma.pairedDevice
         .findFirst({
           where: {
@@ -137,25 +138,32 @@ router.post(
           },
         })
         .then((partnerDevice) => {
-          if (partnerDevice?.pushToken) {
-            fcmService.sendPhotoPush(
-              partnerDevice.pushToken,
-              {
-                eventId: deliveryEvent.id,
-                photoId: photo.id,
-                caption: photo.caption || undefined,
-                senderNickname: req.device!.nickname || 'Your Partner',
-                photoUrl: photo.photoUrl,
-              },
-              async () => {
-                // Stale/unregistered token cleanup
-                await prisma.pairedDevice.update({
-                  where: { id: partnerDevice.id },
-                  data: { pushToken: null },
-                });
-              }
-            );
+          if (!partnerDevice) {
+            console.log(`[PHOTO-SEND] No partner device found in space ${spaceId}`);
+            return;
           }
+          if (!partnerDevice.pushToken) {
+            console.log(`[PHOTO-SEND] Partner device ${partnerDevice.deviceId} (${partnerDevice.nickname}) has NO pushToken registered!`);
+            return;
+          }
+          console.log(`[PHOTO-SEND] Partner device ${partnerDevice.deviceId} (${partnerDevice.nickname}) has pushToken. Initiating FCM push...`);
+          fcmService.sendPhotoPush(
+            partnerDevice.pushToken,
+            {
+              eventId: deliveryEvent.id,
+              photoId: photo.id,
+              caption: photo.caption || undefined,
+              senderNickname: req.device!.nickname || 'Your Partner',
+              photoUrl: photo.photoUrl,
+            },
+            async () => {
+              console.warn(`[PHOTO-SEND] Partner token invalid. Cleaning up stale token for ${partnerDevice.deviceId}`);
+              await prisma.pairedDevice.update({
+                where: { id: partnerDevice.id },
+                data: { pushToken: null },
+              });
+            }
+          );
         })
         .catch((err) => console.error('[FCM] Error dispatching photo push:', err));
 

@@ -57,8 +57,8 @@ export const QuickDrawingScreen: React.FC = () => {
       } else {
         setDeliveryStatus('SENT');
         Alert.alert(
-          'Sent! 💌',
-          `${partner?.nickname || 'Your partner'} is currently offline. Your drawing is queued and will appear the moment they open the app.`,
+          'Sent to Partner! 💌',
+          `Your drawing was dispatched to ${partner?.nickname || 'your partner'}'s device and widget.`,
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       }

@@ -54,6 +54,7 @@ router.post('/ack', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: Re
     }
 
     const spaceId = req.space!.id;
+    console.log(`[DELIVERY-ACK] Device ${req.device!.deviceId} acknowledged delivery for ${eventIds.length} events:`, eventIds);
 
     // Update events to DELIVERED
     await prisma.deliveryEvent.updateMany({

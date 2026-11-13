@@ -10,6 +10,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -24,6 +25,7 @@ import org.json.JSONObject
 class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
+        const val TAG = "TogetherlyFCM"
         const val CHANNEL_ID = "togetherly_moments"
         const val CHANNEL_NAME = "Togetherly Moments"
         const val PREFS_NAME = "togetherly_widget_prefs"
@@ -57,6 +59,7 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
      */
     override fun onNewToken(token: String) {
         super.onNewToken(token)
+        Log.i(TAG, "--> [onNewToken] Generated token: ${token.take(15)}...")
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString("fcm_push_token", token).apply()
 
@@ -66,11 +69,12 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
         val apiUrl = prefs.getString("api_base_url", DEFAULT_API_BASE) ?: DEFAULT_API_BASE
 
         if (!authToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
+            Log.i(TAG, "--> [onNewToken] Registering token to backend with stored session credentials...")
             Thread {
                 try {
                     registerPushTokenToBackend(apiUrl, authToken, token)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "--> [onNewToken] Failed to register token: ${e.message}")
                 }
             }.start()
         }
@@ -83,6 +87,7 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
 
         val data = remoteMessage.data
+        Log.i(TAG, "--> [onMessageReceived] FCM message arrived! Data keys: ${data.keys}")
         if (data.isEmpty()) return
 
         val type = data["type"] ?: return
@@ -95,14 +100,16 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
 
         when (type) {
             "NEW_DRAWING" -> {
+                Log.i(TAG, "--> [onMessageReceived] Handling NEW_DRAWING eventId=$eventId from $senderNickname")
                 handleIncomingDrawing(data, eventId, senderNickname, apiUrl, authToken)
             }
             "NEW_PHOTO" -> {
+                Log.i(TAG, "--> [onMessageReceived] Handling NEW_PHOTO eventId=$eventId from $senderNickname")
                 handleIncomingPhoto(data, eventId, senderNickname, apiUrl, authToken)
             }
             "DELIVERY_ACK" -> {
-                // Sender acknowledgment received
                 val status = data["status"] ?: "DELIVERED"
+                Log.i(TAG, "--> [onMessageReceived] DELIVERY_ACK received: $status")
                 prefs.edit().putString("latest_delivery_status", status).apply()
             }
         }
@@ -119,25 +126,29 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
         val title = data["title"] ?: "Sweet Doodle"
         var canvasData = data["canvasData"]
 
-        // If canvasData was too large for 4KB FCM payload, fetch from backend via GET /api/drawing/:id
-        if (canvasData.isNullOrEmpty() && !authToken.isNullOrEmpty()) {
+        // 1. Post notification immediately so phone rings/vibrates right away!
+        showDrawingNotification(senderNickname, title)
+
+        // 2. If canvasData was omitted from FCM payload (e.g. >3.7KB), fetch from backend
+        if (canvasData.isNullOrEmpty()) {
+            Log.i(TAG, "--> CanvasData empty in FCM payload. Fetching from cloud for drawing $drawingId...")
             canvasData = fetchDrawingCanvasData(apiUrl, authToken, drawingId)
         }
 
         if (!canvasData.isNullOrEmpty()) {
-            // 1. Immediately render vector bitmap & update Quick Sketch widget
+            Log.i(TAG, "--> CanvasData ready (${canvasData.length} bytes). Updating widget & SQLite...")
+            // 3. Immediately render vector bitmap & update Quick Sketch widget
             WidgetDataManager.saveDrawing(applicationContext, title, canvasData)
 
-            // 2. Persist to local SQLite so when the user opens Togetherly, it is already loaded
+            // 4. Persist to local SQLite so when the user opens Togetherly, it is already loaded
             saveDrawingToLocalSqlite(drawingId, title, canvasData, data["previewUrl"])
 
-            // 3. Post System Heads-Up Notification
-            showDrawingNotification(senderNickname, title)
-
-            // 4. Send Delivery Acknowledgment back to sender (state -> DELIVERED)
+            // 5. Send Delivery Acknowledgment back to sender (state -> DELIVERED)
             if (!eventId.isNullOrEmpty() && !authToken.isNullOrEmpty()) {
                 sendDeliveryAck(apiUrl, authToken, eventId)
             }
+        } else {
+            Log.w(TAG, "--> Could not retrieve canvasData for drawing $drawingId")
         }
     }
 
@@ -152,15 +163,16 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
         val photoUrl = data["photoUrl"]
         val caption = data["caption"] ?: "Our Latest Moment"
 
+        // 1. Post notification immediately
+        showPhotoNotification(senderNickname, caption)
+
         if (!photoUrl.isNullOrEmpty()) {
-            // 1. Download photo, scale to 500x500 & update Our Latest Moment widget
+            Log.i(TAG, "--> Processing photo $photoId from URL: $photoUrl")
+            // 2. Download photo, scale to 500x500 & update Our Latest Moment widget
             WidgetDataManager.savePhoto(applicationContext, photoUrl, caption)
 
-            // 2. Persist to local SQLite
+            // 3. Persist to local SQLite
             savePhotoToLocalSqlite(photoId, photoUrl, caption)
-
-            // 3. Post Notification
-            showPhotoNotification(senderNickname, caption)
 
             // 4. Send Delivery Acknowledgment
             if (!eventId.isNullOrEmpty() && !authToken.isNullOrEmpty()) {
@@ -232,11 +244,14 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
                     put("isLocalDraft", 0)
                     put("updatedAt", System.currentTimeMillis())
                 }
-                db.insertWithOnConflict("cached_drawings", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                val rowId = db.insertWithOnConflict("cached_drawings", null, values, SQLiteDatabase.CONFLICT_REPLACE)
                 db.close()
+                Log.i(TAG, "--> [saveDrawingToLocalSqlite] Drawing $drawingId saved to SQLite (row $rowId)")
+            } else {
+                Log.w(TAG, "--> [saveDrawingToLocalSqlite] SQLite file not found at ${dbFile.absolutePath}")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "--> [saveDrawingToLocalSqlite] SQLite insert error: ${e.message}")
         }
     }
 
@@ -251,34 +266,59 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
                     put("prompt", caption ?: "")
                     put("updatedAt", System.currentTimeMillis())
                 }
-                db.insertWithOnConflict("cached_photos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                val rowId = db.insertWithOnConflict("cached_photos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
                 db.close()
+                Log.i(TAG, "--> [savePhotoToLocalSqlite] Photo $photoId saved to SQLite (row $rowId)")
+            } else {
+                Log.w(TAG, "--> [savePhotoToLocalSqlite] SQLite file not found at ${dbFile.absolutePath}")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "--> [savePhotoToLocalSqlite] SQLite insert error: ${e.message}")
         }
     }
 
-    private fun fetchDrawingCanvasData(apiUrl: String, token: String, drawingId: String): String? {
+    private fun fetchDrawingCanvasData(apiUrl: String, token: String?, drawingId: String): String? {
         try {
             val cleanBase = apiUrl.removeSuffix("/").removeSuffix("/api")
-            val url = URL("$cleanBase/api/drawing/$drawingId")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("Authorization", "Bearer $token")
-            conn.connectTimeout = 8000
-            conn.readTimeout = 10000
+            // Try dedicated background download endpoint first, then fallback to standard endpoint
+            val endpoints = listOf(
+                "$cleanBase/api/drawing/download/$drawingId",
+                "$cleanBase/api/drawing/$drawingId"
+            )
 
-            if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(responseText)
-                if (json.has("drawing")) {
-                    val drawingObj = json.getJSONObject("drawing")
-                    return if (drawingObj.has("canvasData")) drawingObj.getString("canvasData") else null
+            for (endpointUrl in endpoints) {
+                try {
+                    val url = URL(endpointUrl)
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.requestMethod = "GET"
+                    if (!token.isNullOrEmpty()) {
+                        conn.setRequestProperty("Authorization", "Bearer $token")
+                    }
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 10000
+
+                    if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                        val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+                        val json = JSONObject(responseText)
+                        if (json.has("drawing")) {
+                            val drawingObj = json.getJSONObject("drawing")
+                            if (drawingObj.has("canvasData")) {
+                                val data = drawingObj.getString("canvasData")
+                                if (data.isNotEmpty()) {
+                                    Log.i(TAG, "--> [fetchDrawingCanvasData] Successfully downloaded drawing from $endpointUrl (${data.length} bytes)")
+                                    return data
+                                }
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "--> [fetchDrawingCanvasData] $endpointUrl returned HTTP ${conn.responseCode}")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "--> [fetchDrawingCanvasData] Error connecting to $endpointUrl: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "--> [fetchDrawingCanvasData] Fatal error: ${e.message}")
         }
         return null
     }
@@ -305,9 +345,10 @@ class TogetherlyFirebaseMessagingService : FirebaseMessagingService() {
                     writer.flush()
                 }
 
-                conn.responseCode // execute
+                val code = conn.responseCode
+                Log.i(TAG, "--> [sendDeliveryAck] Acknowledged delivery for event $eventId (HTTP $code)")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "--> [sendDeliveryAck] Failed to acknowledge event $eventId: ${e.message}")
             }
         }.start()
     }

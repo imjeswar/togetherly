@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.*
 import android.net.Uri
 import android.util.Base64
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import com.togetherly.app.R
@@ -61,6 +62,7 @@ object WidgetDataManager {
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
+            Log.i("TogetherlyWidget", "--> [saveDrawing] Rendered and wrote bitmap to ${file.absolutePath} (${file.length()} bytes)")
 
             // Save metadata to SharedPreferences
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -72,6 +74,7 @@ object WidgetDataManager {
 
             updateQuickDrawingWidgets(context)
         } catch (e: Exception) {
+            Log.e("TogetherlyWidget", "--> [saveDrawing] Error: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -180,6 +183,7 @@ object WidgetDataManager {
         val appWidgetManager = AppWidgetManager.getInstance(context) ?: return
         val componentName = ComponentName(context, QuickDrawingWidget::class.java)
         val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
+        Log.i("TogetherlyWidget", "--> [updateQuickDrawingWidgets] Found ${appWidgetIds.size} active QuickDrawing widgets to update")
 
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val hasDrawing = prefs.getBoolean("has_drawing", false)

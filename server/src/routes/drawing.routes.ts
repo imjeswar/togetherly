@@ -84,6 +84,7 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
 
     // 3. TRUE BACKGROUND FCM DELIVERY
     // Look up partner device token even if partner app is closed/sleeping
+    console.log(`[DRAWING-SEND] Space ${spaceId}: Drawing ${drawing.id} saved by ${senderDeviceId}. Checking partner...`);
     prisma.pairedDevice
       .findFirst({
         where: {
@@ -92,26 +93,34 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
         },
       })
       .then((partnerDevice) => {
-        if (partnerDevice?.pushToken) {
-          fcmService.sendDrawingPush(
-            partnerDevice.pushToken,
-            {
-              eventId: deliveryEvent.id,
-              drawingId: drawing.id,
-              title: drawing.title || 'Sweet Doodle',
-              senderNickname: req.device!.nickname || 'Your Partner',
-              canvasData: drawing.canvasData,
-              previewUrl: drawing.previewUrl || undefined,
-            },
-            async () => {
-              // Stale/unregistered token cleanup
-              await prisma.pairedDevice.update({
-                where: { id: partnerDevice.id },
-                data: { pushToken: null },
-              });
-            }
-          );
+        if (!partnerDevice) {
+          console.log(`[DRAWING-SEND] No partner device found in space ${spaceId}`);
+          return;
         }
+        if (!partnerDevice.pushToken) {
+          console.log(`[DRAWING-SEND] Partner device ${partnerDevice.deviceId} (${partnerDevice.nickname}) has NO pushToken registered!`);
+          return;
+        }
+        console.log(`[DRAWING-SEND] Partner device ${partnerDevice.deviceId} (${partnerDevice.nickname}) has pushToken. Initiating FCM push...`);
+        fcmService.sendDrawingPush(
+          partnerDevice.pushToken,
+          {
+            eventId: deliveryEvent.id,
+            drawingId: drawing.id,
+            title: drawing.title || 'Sweet Doodle',
+            senderNickname: req.device!.nickname || 'Your Partner',
+            canvasData: drawing.canvasData,
+            previewUrl: drawing.previewUrl || undefined,
+            downloadUrl: `/api/drawing/download/${drawing.id}`,
+          },
+          async () => {
+            console.warn(`[DRAWING-SEND] Partner token invalid. Cleaning up stale token for ${partnerDevice.deviceId}`);
+            await prisma.pairedDevice.update({
+              where: { id: partnerDevice.id },
+              data: { pushToken: null },
+            });
+          }
+        );
       })
       .catch((err) => console.error('[FCM] Error dispatching drawing push:', err));
 
@@ -160,6 +169,22 @@ router.get('/gallery', deviceAuthMiddleware, async (req: DeviceAuthRequest, res:
   } catch (error: any) {
     console.error('Get drawings gallery error:', error);
     return res.status(500).json({ error: 'Failed to fetch drawings gallery' });
+  }
+});
+
+// 2.5 DIRECT BACKGROUND DRAWING DOWNLOAD (For FCM Native Service)
+router.get('/download/:id', async (req, res) => {
+  try {
+    const drawing = await prisma.drawingMetadata.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, title: true, canvasData: true, previewUrl: true, spaceId: true },
+    });
+    if (!drawing) {
+      return res.status(404).json({ error: 'Drawing not found' });
+    }
+    return res.json({ success: true, drawing });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Download failed' });
   }
 });
 
