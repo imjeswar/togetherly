@@ -173,4 +173,11 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Firebase Cloud Messaging & WorkManager for True Background Delivery
+    implementation platform('com.google.firebase:firebase-bom:33.7.0')
+    implementation 'com.google.firebase:firebase-messaging-ktx'
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
 }
+
+apply plugin: 'com.google.gms.google-services'

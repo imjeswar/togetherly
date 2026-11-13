@@ -23,12 +23,15 @@ server/.env
 mobile/.env
 client/.env
 .neon
+*serviceAccountKey*.json
+*.pem
 
 # Databases
 dev.db
 dev.db-journal
 *.db
 *.db-journal
+scratch/
 
 # Uploads & logs
 uploads/*

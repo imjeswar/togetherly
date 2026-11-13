@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../prisma.js';
 import { deviceAuthMiddleware, DeviceAuthRequest } from '../middleware/deviceAuth.js';
 import { getIO, isPartnerOnline } from '../socket.js';
+import { fcmService } from '../services/fcm.service.js';
 
 const router = Router();
 
@@ -80,6 +81,39 @@ router.post('/send', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: R
         });
       }
     }
+
+    // 3. TRUE BACKGROUND FCM DELIVERY
+    // Look up partner device token even if partner app is closed/sleeping
+    prisma.pairedDevice
+      .findFirst({
+        where: {
+          spaceId,
+          deviceId: { not: senderDeviceId },
+        },
+      })
+      .then((partnerDevice) => {
+        if (partnerDevice?.pushToken) {
+          fcmService.sendDrawingPush(
+            partnerDevice.pushToken,
+            {
+              eventId: deliveryEvent.id,
+              drawingId: drawing.id,
+              title: drawing.title || 'Sweet Doodle',
+              senderNickname: req.device!.nickname || 'Your Partner',
+              canvasData: drawing.canvasData,
+              previewUrl: drawing.previewUrl || undefined,
+            },
+            async () => {
+              // Stale/unregistered token cleanup
+              await prisma.pairedDevice.update({
+                where: { id: partnerDevice.id },
+                data: { pushToken: null },
+              });
+            }
+          );
+        }
+      })
+      .catch((err) => console.error('[FCM] Error dispatching drawing push:', err));
 
     return res.status(201).json({
       success: true,

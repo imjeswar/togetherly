@@ -402,6 +402,12 @@ router.post('/unpair', deviceAuthMiddleware, async (req: DeviceAuthRequest, res:
       data: { status: 'UNPAIRED' },
     });
 
+    // Revoke push tokens on unpair
+    await prisma.pairedDevice.updateMany({
+      where: { spaceId: req.space!.id },
+      data: { pushToken: null },
+    });
+
     const io = getIO();
     if (io) {
       io.to(`space_${req.space!.id}`).emit('space_unpaired', {
@@ -417,6 +423,37 @@ router.post('/unpair', deviceAuthMiddleware, async (req: DeviceAuthRequest, res:
   } catch (error: any) {
     console.error('Unpair error:', error);
     return res.status(500).json({ error: 'Failed to unpair sanctuary' });
+  }
+});
+
+// 6. REGISTER FCM PUSH TOKEN FOR TRUE BACKGROUND DELIVERY
+router.post('/push-token', deviceAuthMiddleware, async (req: DeviceAuthRequest, res: Response) => {
+  try {
+    const { pushToken, platform = 'android' } = req.body;
+
+    if (!pushToken || typeof pushToken !== 'string') {
+      return res.status(400).json({ error: 'Valid pushToken string is required' });
+    }
+
+    const updated = await prisma.pairedDevice.update({
+      where: { id: req.device!.id },
+      data: {
+        pushToken: pushToken.trim(),
+        platform,
+        lastActiveAt: new Date(),
+      },
+    });
+
+    console.log(`[PushToken] Device ${req.device!.deviceId} registered FCM token (${pushToken.substring(0, 15)}...)`);
+
+    return res.json({
+      success: true,
+      message: 'FCM push token registered successfully',
+      deviceId: updated.deviceId,
+    });
+  } catch (error: any) {
+    console.error('Push token registration error:', error);
+    return res.status(500).json({ error: 'Failed to register push token' });
   }
 });
 

@@ -18,7 +18,7 @@ import java.io.FileOutputStream
 
 object WidgetDataManager {
 
-    private const val PREFS_NAME = "togetherly_widget_prefs"
+    const val PREFS_NAME = "togetherly_widget_prefs"
     private const val DRAWING_FILENAME = "widget_latest_drawing.png"
     private const val PHOTO_FILENAME = "widget_latest_photo.png"
 

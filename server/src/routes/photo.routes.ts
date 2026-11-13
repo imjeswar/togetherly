@@ -5,6 +5,7 @@ import fs from 'fs';
 import { prisma } from '../prisma.js';
 import { deviceAuthMiddleware, DeviceAuthRequest } from '../middleware/deviceAuth.js';
 import { getIO, isPartnerOnline } from '../socket.js';
+import { fcmService } from '../services/fcm.service.js';
 
 const router = Router();
 
@@ -125,6 +126,38 @@ router.post(
           });
         }
       }
+
+      // 3. TRUE BACKGROUND FCM DELIVERY
+      // Look up partner device token even if partner app is closed/sleeping
+      prisma.pairedDevice
+        .findFirst({
+          where: {
+            spaceId,
+            deviceId: { not: senderDeviceId },
+          },
+        })
+        .then((partnerDevice) => {
+          if (partnerDevice?.pushToken) {
+            fcmService.sendPhotoPush(
+              partnerDevice.pushToken,
+              {
+                eventId: deliveryEvent.id,
+                photoId: photo.id,
+                caption: photo.caption || undefined,
+                senderNickname: req.device!.nickname || 'Your Partner',
+                photoUrl: photo.photoUrl,
+              },
+              async () => {
+                // Stale/unregistered token cleanup
+                await prisma.pairedDevice.update({
+                  where: { id: partnerDevice.id },
+                  data: { pushToken: null },
+                });
+              }
+            );
+          }
+        })
+        .catch((err) => console.error('[FCM] Error dispatching photo push:', err));
 
       return res.status(201).json({
         success: true,

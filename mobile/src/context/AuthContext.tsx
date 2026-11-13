@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { secureStorage } from '../services/secureStore';
 import { offlineStorage } from '../services/offlineStorage';
 import { api } from '../services/api';
@@ -115,6 +115,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Connect real-time socket
         socketService.connectSpace(res.spaceId, persistentDeviceId);
+
+        // Sync native credentials for background FCM processing & widgets
+        widgetBridge.setSessionCredentials(savedToken, persistentDeviceId, res.spaceId, ENV.API_BASE_URL);
+
+        // Register FCM Push Token for background delivery
+        widgetBridge.getPushToken().then((pushToken) => {
+          if (pushToken) {
+            api.registerPushToken(pushToken, Platform.OS).catch(() => {});
+          }
+        });
       } else {
         // Space uncoupled or deleted
         await secureStorage.clearAll();
@@ -264,6 +274,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await secureStorage.setSpaceId(res.spaceId);
       setSpaceId(res.spaceId);
       socketService.connectSpace(res.spaceId, activeDeviceId);
+      if (res.token) {
+        widgetBridge.setSessionCredentials(res.token, activeDeviceId, res.spaceId, ENV.API_BASE_URL);
+        widgetBridge.getPushToken().then((pushToken) => {
+          if (pushToken) api.registerPushToken(pushToken, Platform.OS).catch(() => {});
+        });
+      }
     }
 
     if (res.invitationCode) {
@@ -296,6 +312,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await secureStorage.setSpaceId(res.spaceId);
       setSpaceId(res.spaceId);
       socketService.connectSpace(res.spaceId, activeDeviceId);
+      if (res.token) {
+        widgetBridge.setSessionCredentials(res.token, activeDeviceId, res.spaceId, ENV.API_BASE_URL);
+        widgetBridge.getPushToken().then((pushToken) => {
+          if (pushToken) api.registerPushToken(pushToken, Platform.OS).catch(() => {});
+        });
+      }
     }
 
     if (res.partner) {

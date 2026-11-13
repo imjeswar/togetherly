@@ -132,4 +132,31 @@ export const widgetBridge = {
       return null;
     }
   },
+
+  /**
+   * Syncs active credentials to native SharedPreferences for background FCM delivery
+   */
+  setSessionCredentials: async (authToken: string, deviceId: string, spaceId: string, apiUrl: string) => {
+    try {
+      if (Platform.OS === 'android' && TogetherlyWidgetModule?.setSessionCredentials) {
+        await TogetherlyWidgetModule.setSessionCredentials(authToken, deviceId, spaceId, apiUrl);
+      }
+    } catch (e) {
+      console.warn('Failed to set session credentials in native widget module:', e);
+    }
+  },
+
+  /**
+   * Gets current FCM push token from native module
+   */
+  getPushToken: async (): Promise<string | null> => {
+    try {
+      if (Platform.OS === 'android' && TogetherlyWidgetModule?.getPushToken) {
+        return await TogetherlyWidgetModule.getPushToken();
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
 };

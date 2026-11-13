@@ -49,5 +49,44 @@ class TogetherlyWidgetModule(private val reactContext: ReactApplicationContext) 
             promise.reject("REFRESH_ERROR", e.message)
         }
     }
+
+    @ReactMethod
+    fun setSessionCredentials(authToken: String, deviceId: String, spaceId: String, apiUrl: String, promise: Promise) {
+        try {
+            val prefs = reactContext.getSharedPreferences(WidgetDataManager.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("auth_token", authToken)
+                .putString("device_id", deviceId)
+                .putString("space_id", spaceId)
+                .putString("api_base_url", apiUrl)
+                .apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("SESSION_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun getPushToken(promise: Promise) {
+        try {
+            val prefs = reactContext.getSharedPreferences(WidgetDataManager.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            val cachedToken = prefs.getString("fcm_push_token", null)
+
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful && task.result != null) {
+                        val token = task.result
+                        prefs.edit().putString("fcm_push_token", token).apply()
+                        promise.resolve(token)
+                    } else {
+                        promise.resolve(cachedToken)
+                    }
+                }
+        } catch (e: Exception) {
+            val prefs = reactContext.getSharedPreferences(WidgetDataManager.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            val cachedToken = prefs.getString("fcm_push_token", null)
+            promise.resolve(cachedToken)
+        }
+    }
 }
 

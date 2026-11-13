@@ -238,6 +238,8 @@ class ApiService {
   updateSpaceProfile = (payload: { nickname?: string; avatarUrl?: string }) =>
     this.request('/space/profile', { method: 'PUT', body: JSON.stringify(payload) });
   unpairSpace = () => this.request('/space/unpair', { method: 'POST', allowOfflineQueue: false });
+  registerPushToken = (pushToken: string, platform = 'android') =>
+    this.request('/space/push-token', { method: 'POST', body: JSON.stringify({ pushToken, platform }), allowOfflineQueue: false });
 
   // --- DRAWING ---
   sendQuickDraw = (payload: { eventId?: string; canvasData: any; previewData?: string; title?: string }) =>
